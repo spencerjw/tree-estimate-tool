@@ -139,7 +139,7 @@ export default async function handler(req, res) {
     }));
 
     const message = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022', // upgrade to claude-sonnet-4-6 for latest version
+      model: 'claude-sonnet-4-5', // upgrade to claude-sonnet-4-6 for latest version
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [
