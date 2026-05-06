@@ -139,7 +139,7 @@ export default async function handler(req, res) {
     }));
 
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-5', // upgrade to claude-sonnet-4-6 for latest version
+      model: 'claude-sonnet-4-6', // upgrade to claude-sonnet-4-6 for latest version
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [
@@ -155,7 +155,10 @@ export default async function handler(req, res) {
 
     let estimate;
     try {
-      estimate = JSON.parse(message.content[0].text);
+      // Strip markdown code fences if Claude wraps the JSON (e.g. ```json ... ```)
+      let rawText = message.content[0].text.trim();
+      rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      estimate = JSON.parse(rawText);
     } catch {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
