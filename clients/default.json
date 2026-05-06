@@ -1,0 +1,14 @@
+{
+  "businessName": "TreeSnap Demo",
+  "businessEmail": "spencer@winegarden.org",
+  "businessPhone": "",
+  "replyTo": "spencer@winegarden.org",
+  "market": "Central Texas",
+  "subdomain": "demo",
+  "fromName": "TreeSnap Estimator",
+  "fromEmail": "estimates@treesnap.cloud",
+  "accentColor": "#2d6a2d",
+  "smsEnabled": false,
+  "zapierWebhook": null,
+  "tier": "starter"
+}
