@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Free Tree Estimate — TreePro</title>
+  <meta name="description" content="Upload photos of your tree and get an instant AI-powered price estimate for removal, trimming, or storm damage cleanup." />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- ===================== HEADER ===================== -->
+  <header class="site-header">
+    <div class="container">
+      <div class="logo">
+        <span class="logo-icon" aria-hidden="true">🌳</span>
+        <!-- TODO: Replace text logo with your actual SVG/image logo -->
+        <span class="logo-name">TreePro</span>
+      </div>
+      <p class="header-tagline">Central Texas Tree Experts</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ===================== HERO ===================== -->
+    <section class="hero">
+      <h1 class="hero-title">Get Your Free Tree Estimate<br><span>In Under 60 Seconds</span></h1>
+      <p class="hero-sub">Upload 1–3 photos of your tree. Our AI analyzes size, condition, and complexity to give you a realistic price range — no waiting, no sales call required.</p>
+      <ul class="trust-badges" aria-label="Trust indicators">
+        <li><span aria-hidden="true">✓</span> Free &amp; instant</li>
+        <li><span aria-hidden="true">✓</span> No obligation</li>
+        <li><span aria-hidden="true">✓</span> Licensed &amp; insured</li>
+      </ul>
+    </section>
+
+    <!-- ===================== FORM SECTION ===================== -->
+    <section id="form-section" class="card form-card" aria-labelledby="form-heading">
+      <h2 id="form-heading" class="card-title">Tell Us About Your Tree</h2>
+
+      <form id="estimate-form" novalidate>
+
+        <!-- Contact info -->
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Your Information</legend>
+          <div class="field-row">
+            <div class="field">
+              <label for="name">Full Name <span class="required" aria-hidden="true">*</span></label>
+              <input type="text" id="name" name="name" autocomplete="name"
+                     placeholder="Jane Smith" required />
+              <span class="field-error" role="alert" aria-live="polite"></span>
+            </div>
+            <div class="field">
+              <label for="phone">Phone Number <span class="required" aria-hidden="true">*</span></label>
+              <input type="tel" id="phone" name="phone" autocomplete="tel"
+                     placeholder="(512) 555-0100" required />
+              <span class="field-error" role="alert" aria-live="polite"></span>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="email">Email Address <span class="required" aria-hidden="true">*</span></label>
+              <input type="email" id="email" name="email" autocomplete="email"
+                     placeholder="jane@example.com" required />
+              <span class="field-error" role="alert" aria-live="polite"></span>
+            </div>
+            <div class="field">
+              <label for="zip">Zip Code <span class="required" aria-hidden="true">*</span></label>
+              <input type="text" id="zip" name="zip" autocomplete="postal-code"
+                     placeholder="78701" maxlength="10" required />
+              <span class="field-error" role="alert" aria-live="polite"></span>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Service type -->
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Service Needed <span class="required" aria-hidden="true">*</span></legend>
+          <div class="service-grid" role="radiogroup" aria-required="true">
+            <label class="service-option">
+              <input type="radio" name="serviceType" value="removal" required />
+              <span class="service-card">
+                <span class="service-icon" aria-hidden="true">🪚</span>
+                <span class="service-label">Tree Removal</span>
+              </span>
+            </label>
+            <label class="service-option">
+              <input type="radio" name="serviceType" value="trimming" />
+              <span class="service-card">
+                <span class="service-icon" aria-hidden="true">✂️</span>
+                <span class="service-label">Trimming / Pruning</span>
+              </span>
+            </label>
+            <label class="service-option">
+              <input type="radio" name="serviceType" value="storm_damage" />
+              <span class="service-card">
+                <span class="service-icon" aria-hidden="true">⛈️</span>
+                <span class="service-label">Storm Damage</span>
+              </span>
+            </label>
+            <label class="service-option">
+              <input type="radio" name="serviceType" value="emergency" />
+              <span class="service-card">
+                <span class="service-icon" aria-hidden="true">🚨</span>
+                <span class="service-label">Emergency</span>
+              </span>
+            </label>
+          </div>
+          <span class="field-error" id="service-error" role="alert" aria-live="polite"></span>
+        </fieldset>
+
+        <!-- Photo upload -->
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Upload Photos <span class="required" aria-hidden="true">*</span></legend>
+          <p class="fieldset-hint">1–3 photos work best. Include the full tree and any nearby structures.</p>
+
+          <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
+               aria-label="Click or drag photos here to upload">
+            <input type="file" id="photo-input" name="photos" accept="image/jpeg,image/png,image/webp,image/heic"
+                   multiple aria-hidden="true" tabindex="-1" />
+            <div class="upload-prompt">
+              <span class="upload-icon" aria-hidden="true">📷</span>
+              <p class="upload-main">Tap to add photos</p>
+              <p class="upload-sub">or drag &amp; drop • JPG, PNG, WEBP • max 3 photos</p>
+            </div>
+          </div>
+
+          <div id="photo-previews" class="photo-previews" aria-label="Selected photos" aria-live="polite"></div>
+          <span class="field-error" id="photo-error" role="alert" aria-live="polite"></span>
+        </fieldset>
+
+        <p class="form-privacy">
+          <span aria-hidden="true">🔒</span> Your information is only used to prepare your estimate and follow up.
+          We never sell your data.
+        </p>
+
+        <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+          <span id="submit-label">Get My Free Estimate</span>
+        </button>
+
+      </form>
+    </section>
+
+    <!-- ===================== LOADING SECTION ===================== -->
+    <section id="loading-section" class="card loading-card hidden" aria-live="polite" aria-atomic="true">
+      <div class="loading-inner">
+        <div class="spinner" aria-hidden="true">
+          <div class="spinner-ring"></div>
+          <span class="spinner-tree" aria-hidden="true">🌳</span>
+        </div>
+        <h2 class="loading-title">Analyzing Your Tree…</h2>
+        <p id="loading-step" class="loading-step">Identifying species and size</p>
+        <div class="loading-steps" aria-hidden="true">
+          <div class="step-dot active" data-step="0"></div>
+          <div class="step-dot" data-step="1"></div>
+          <div class="step-dot" data-step="2"></div>
+          <div class="step-dot" data-step="3"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== RESULTS SECTION ===================== -->
+    <section id="results-section" class="hidden" aria-labelledby="results-heading">
+
+      <div class="results-header">
+        <span class="results-check" aria-hidden="true">✅</span>
+        <h2 id="results-heading">Your Preliminary Estimate</h2>
+        <p class="results-sub">Based on the photos you submitted</p>
+      </div>
+
+      <!-- Tree assessment card -->
+      <div class="card assessment-card">
+        <h3 class="card-section-title">Tree Assessment</h3>
+        <dl class="assessment-grid">
+          <div class="assessment-item">
+            <dt>Species</dt>
+            <dd id="res-species">—</dd>
+          </div>
+          <div class="assessment-item">
+            <dt>Est. Height</dt>
+            <dd id="res-height">—</dd>
+          </div>
+          <div class="assessment-item">
+            <dt>Trunk Diameter</dt>
+            <dd id="res-diameter">—</dd>
+          </div>
+          <div class="assessment-item">
+            <dt>Condition</dt>
+            <dd id="res-condition">—</dd>
+          </div>
+          <div class="assessment-item">
+            <dt>Job Complexity</dt>
+            <dd id="res-complexity">—</dd>
+          </div>
+        </dl>
+
+        <div id="complexity-factors-wrap" class="tag-list-wrap hidden">
+          <p class="tag-list-label">Complexity Factors</p>
+          <ul id="complexity-factors" class="tag-list" aria-label="Complexity factors"></ul>
+        </div>
+
+        <div id="safety-wrap" class="safety-alert hidden" role="alert">
+          <p class="safety-title"><span aria-hidden="true">⚠️</span> Safety Concerns Identified</p>
+          <ul id="safety-concerns" class="safety-list"></ul>
+        </div>
+      </div>
+
+      <!-- Estimate card -->
+      <div class="card estimate-card">
+        <h3 class="card-section-title">
+          Price Estimate
+          <span id="res-service-label" class="service-badge"></span>
+        </h3>
+
+        <table class="line-items" aria-label="Estimate line items">
+          <thead>
+            <tr>
+              <th scope="col">Service</th>
+              <th scope="col" class="col-price">Range</th>
+            </tr>
+          </thead>
+          <tbody id="line-items-body">
+            <!-- populated by JS -->
+          </tbody>
+          <tfoot>
+            <tr class="total-row">
+              <th scope="row">Estimated Total</th>
+              <td class="col-price total-range" id="res-total">—</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <p id="res-notes" class="estimate-notes"></p>
+
+        <div class="disclaimer">
+          <strong>Disclaimer:</strong> This is a preliminary estimate based on submitted photos only.
+          Actual pricing may vary based on site conditions, access, and additional factors discovered
+          during an in-person assessment. Final quote provided after a free on-site visit.
+        </div>
+      </div>
+
+      <!-- CTA card -->
+      <div class="card cta-card">
+        <h3 class="cta-title">Ready to Move Forward?</h3>
+        <p class="cta-body">Lock in your price with a free on-site visit — no commitment required. One of our certified arborists will confirm the estimate and schedule your service.</p>
+        <a href="tel:+15125550100" class="btn btn-primary btn-full" id="cta-call-btn">
+          <!-- TODO: Replace phone number with your actual business number -->
+          📞 Call Now to Book Your Free On-Site Visit
+        </a>
+        <p class="cta-or">or</p>
+        <button class="btn btn-outline btn-full" id="cta-restart-btn" type="button">
+          Submit Another Tree
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ===================== ERROR SECTION ===================== -->
+    <div id="api-error" class="card error-card hidden" role="alert">
+      <p class="error-title"><span aria-hidden="true">⚠️</span> Something Went Wrong</p>
+      <p id="api-error-msg" class="error-msg"></p>
+      <button class="btn btn-outline" id="error-retry-btn" type="button">Try Again</button>
+    </div>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <!-- TODO: Update company name, phone, license number -->
+      <p>© <span id="footer-year"></span> TreePro Tree Services &nbsp;·&nbsp; Licensed &amp; Insured &nbsp;·&nbsp; Central Texas</p>
+      <p class="footer-fine">Estimates generated by AI are preliminary only and do not constitute a binding quote.</p>
+    </div>
+  </footer>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

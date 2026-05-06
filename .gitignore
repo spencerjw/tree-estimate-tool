@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+.vercel/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

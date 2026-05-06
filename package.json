@@ -1,0 +1,15 @@
+{
+  "name": "tree-estimate-tool",
+  "version": "1.0.0",
+  "description": "AI-powered tree service estimate tool",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  }
+}
