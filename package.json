@@ -6,7 +6,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.52.0"
+    "@anthropic-ai/sdk": "^0.52.0",
+    "resend": "^4.0.0"
   },
   "scripts": {
     "dev": "vercel dev",
