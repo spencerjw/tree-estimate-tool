@@ -71,6 +71,7 @@ footerYear.textContent = new Date().getFullYear();
 // Photo upload — drag/drop + click
 // ---------------------------------------------------------------------------
 uploadZone.addEventListener('click', () => photoInput.click());
+photoInput.addEventListener('click', (e) => e.stopPropagation()); // prevent double-open on Windows
 uploadZone.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoInput.click(); }
 });
