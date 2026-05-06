@@ -139,7 +139,7 @@ export default async function handler(req, res) {
     }));
 
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6', // upgrade to claude-sonnet-4-6 for latest version
+      model: 'claude-3-5-sonnet-20241022', // upgrade to claude-sonnet-4-6 for latest version
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [
@@ -160,8 +160,9 @@ export default async function handler(req, res) {
       rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
       estimate = JSON.parse(rawText);
     } catch {
-      console.error('Claude returned non-JSON:', message.content[0].text);
-      return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
+      const rawResp = message.content[0].text;
+      console.error('Claude returned non-JSON:', rawResp);
+      return res.status(500).json({ error: 'Failed to parse estimate from AI response. Raw: ' + rawResp.slice(0, 200) });
     }
 
     // -----------------------------------------------------------------------
