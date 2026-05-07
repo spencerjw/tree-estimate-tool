@@ -239,6 +239,52 @@ function buildCustomerEmail(client, lead, estimate) {
 }
 
 // ---------------------------------------------------------------------------
+// VALIDATION PROMPT — checks photos are tree-related and usable quality
+// ---------------------------------------------------------------------------
+const VALIDATION_PROMPT = `You are a quality-control system for a tree service estimate tool.
+Your job is to evaluate submitted photos BEFORE an estimate is generated.
+
+Analyze all submitted photos and return ONLY valid JSON — no markdown, no prose.
+
+Check for two things:
+1. SUBJECT: Do the photos show trees, tree limbs, stumps, storm-damaged trees, or other tree-related subjects appropriate for a tree service company to estimate?
+2. QUALITY: Are the photos clear enough, well-lit enough, and close enough to a tree to make a meaningful assessment? (Extremely blurry, pitch-black, or showing only sky/ground with no tree visible would fail.)
+
+Be reasonably lenient on quality — a slightly blurry phone photo of a real tree should pass. Only reject if it's genuinely impossible to assess.
+
+Return JSON in this exact shape:
+{
+  "valid": true | false,
+  "confidence": number between 0.0 and 1.0,
+  "subject_detected": "brief description of what is actually in the photos",
+  "rejection_reason": "plain English explanation for the customer — null if valid is true"
+}
+
+Confidence threshold: if confidence is below 0.65, set valid to false.`;
+
+// ---------------------------------------------------------------------------
+// VALIDATION FUNCTION
+// ---------------------------------------------------------------------------
+async function validateImages(client, imageBlocks) {
+  const result = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 256,
+    system: VALIDATION_PROMPT,
+    messages: [{
+      role: 'user',
+      content: [
+        ...imageBlocks,
+        { type: 'text', text: 'Please validate these photos for a tree service estimate submission.' },
+      ],
+    }],
+  });
+
+  let rawText = result.content[0].text.trim();
+  rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  return JSON.parse(rawText);
+}
+
+// ---------------------------------------------------------------------------
 // User message builder
 // ---------------------------------------------------------------------------
 function buildUserMessage(serviceType, zip) {
@@ -299,6 +345,30 @@ export default async function handler(req, res) {
       source: { type: 'base64', media_type: img.mediaType, data: img.data },
     }));
 
+    // -----------------------------------------------------------------------
+    // PHASE 1: Validate photos before running estimate
+    // -----------------------------------------------------------------------
+    let validation;
+    try {
+      validation = await validateImages(client, imageBlocks);
+    } catch (valErr) {
+      console.error('Validation parse error:', valErr);
+      // If validation itself fails to parse, let it through — don't block on our own error
+      validation = { valid: true, confidence: 1.0 };
+    }
+
+    if (!validation.valid) {
+      return res.status(422).json({
+        error: validation.rejection_reason ?? 'We could not identify tree-related content in your photos. Please upload clear photos of the tree or damage you need assessed.',
+        validation_failed: true,
+        confidence: validation.confidence,
+        subject_detected: validation.subject_detected,
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // PHASE 2: Generate estimate (photos passed validation)
+    // -----------------------------------------------------------------------
     const message = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 1024,
