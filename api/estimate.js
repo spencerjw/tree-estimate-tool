@@ -187,7 +187,6 @@ The property is in zip code ${zip}. Return only the JSON estimate as described.`
 // ---------------------------------------------------------------------------
 // NOTE: requires `alter table estimates add column is_demo boolean default false;` in Supabase
 async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isDemoEstimate = false) {
-  console.log('logEstimate called:', { customerId, isDemoEstimate, monthKey, email: lead.email });
   const insertResult = await supabase.from('estimates').insert({
     is_demo:         isDemoEstimate,
     customer_id:     customerId,
@@ -203,7 +202,6 @@ async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isD
     month_key:       monthKey,
   });
 
-  console.log('Supabase insert result:', { error: insertResult.error, count: insertResult.data?.length });
   if (insertResult.error) {
     console.error('Failed to log estimate:', JSON.stringify(insertResult.error));
   }
