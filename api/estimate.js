@@ -2,6 +2,7 @@
 // Detects customer from subdomain, checks limits, generates estimate, logs to Supabase.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { sendLeadNotificationEmail, sendHomeownerEstimateEmail } from '../lib/emails.js';
 
@@ -183,11 +184,48 @@ The property is in zip code ${zip}. Return only the JSON estimate as described.`
 }
 
 // ---------------------------------------------------------------------------
+// Supabase Storage photo upload
+// ---------------------------------------------------------------------------
+// NOTE: requires bucket 'estimate-photos' created in Supabase dashboard (private, 10MB limit)
+async function uploadPhotos(images, estimateId, isDemo) {
+  const folder = isDemo ? 'demo' : estimateId;
+  const paths = [];
+  const MAX_SIZE_BYTES = 8 * 1024 * 1024; // 8MB per photo
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const ext = img.mediaType.split('/')[1] || 'jpg';
+    const path = `${folder}/${estimateId}/${i + 1}.${ext}`;
+    const buffer = Buffer.from(img.data, 'base64');
+
+    if (buffer.length > MAX_SIZE_BYTES) {
+      console.warn(`Photo ${i + 1} exceeds 8MB limit (${(buffer.length / 1024 / 1024).toFixed(1)}MB), skipping`);
+      continue;
+    }
+
+    const { error } = await supabase.storage
+      .from('estimate-photos')
+      .upload(path, buffer, { contentType: img.mediaType, upsert: true });
+
+    if (error) {
+      console.error(`Failed to upload photo ${i + 1}:`, error.message);
+    } else {
+      paths.push(path);
+    }
+  }
+
+  return paths;
+}
+
+// ---------------------------------------------------------------------------
 // Supabase logging
 // ---------------------------------------------------------------------------
-// NOTE: requires `alter table estimates add column is_demo boolean default false;` in Supabase
-async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isDemoEstimate = false) {
+// NOTE: requires:
+//   alter table estimates add column is_demo boolean default false;
+//   alter table estimates add column photo_paths text[];
+async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isDemoEstimate = false, photoPaths = [], estimateId = null) {
   const insertResult = await supabase.from('estimates').insert({
+    id:              estimateId || undefined,
     is_demo:         isDemoEstimate,
     customer_id:     customerId,
     homeowner_name:  lead.name,
@@ -196,6 +234,7 @@ async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isD
     zip_code:        lead.zip,
     service_type:    lead.serviceType,
     photo_count:     photoCount,
+    photo_paths:     photoPaths.length > 0 ? photoPaths : null,
     estimate_data:   estimate,
     estimate_low:    estimate.total_low,
     estimate_high:   estimate.total_high,
@@ -207,7 +246,7 @@ async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isD
   }
 
   // Demo estimates don't count against tier usage limits
-  if (!isDemoEstimate) {
+  if (!isDemoEstimate && customerId) {
     const rpcResult = await supabase.rpc('increment_estimate_count', {
       p_customer_id: customerId,
       p_month_key:   monthKey,
@@ -239,6 +278,7 @@ export default async function handler(req, res) {
 
   const host = req.headers.host ?? '';
   const isDemo = isDemoHost(host);
+  const estimateId = randomUUID();
 
   // -------------------------------------------------------------------------
   // 1. Load customer config
@@ -342,6 +382,18 @@ export default async function handler(req, res) {
     }
 
     // -----------------------------------------------------------------------
+    // 4b. Upload photos to Supabase Storage
+    // -----------------------------------------------------------------------
+    let photoPaths = [];
+    try {
+      photoPaths = await uploadPhotos(images, estimateId, isDemo);
+      console.log(`Uploaded ${photoPaths.length} photos for estimate ${estimateId}`);
+    } catch (err) {
+      console.error('Photo upload error:', err?.message ?? err);
+      // Non-fatal — continue without photos
+    }
+
+    // -----------------------------------------------------------------------
     // 5. Phase 2 — generate estimate
     // -----------------------------------------------------------------------
     const systemPrompt = buildSystemPrompt(customer, customerConfig);
@@ -372,10 +424,25 @@ export default async function handler(req, res) {
     // 6. Log to Supabase (always log, tag demo estimates)
     // -----------------------------------------------------------------------
     const monthKey = new Date().toISOString().slice(0, 7);
-    try {
-      await logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo);
-    } catch (err) {
-      console.error('logEstimate error:', err?.message ?? err);
+    logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo, photoPaths, estimateId).catch(err => {
+      console.error('Background logging error:', err);
+    });
+
+    // -----------------------------------------------------------------------
+    // 6b. Generate signed URLs for photos (7-day expiry)
+    // -----------------------------------------------------------------------
+    let photoSignedUrls = [];
+    if (photoPaths.length > 0) {
+      for (const path of photoPaths) {
+        const { data, error } = await supabase.storage
+          .from('estimate-photos')
+          .createSignedUrl(path, 604800);
+        if (data?.signedUrl) {
+          photoSignedUrls.push(data.signedUrl);
+        } else {
+          console.error('Failed to sign URL for:', path, error?.message);
+        }
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -383,18 +450,10 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     const resendKey = process.env.RESEND_API_KEY;
     if (resendKey && customer.email) {
-      try {
-        await sendLeadNotificationEmail(customer, lead, estimate);
-        console.log('Lead notification sent to:', customer.email);
-      } catch (err) {
-        console.error('Lead notification failed:', err?.message ?? err);
-      }
-      try {
-        await sendHomeownerEstimateEmail({ ...lead }, estimate, customer);
-        console.log('Homeowner email sent to:', lead.email);
-      } catch (err) {
-        console.error('Homeowner email failed:', err?.message ?? err);
-      }
+      Promise.all([
+        sendLeadNotificationEmail(customer, lead, estimate, photoSignedUrls),
+        sendHomeownerEstimateEmail({ ...lead }, estimate, customer),
+      ]).catch(err => console.error('Email send failed:', err));
     }
 
     console.log('NEW ESTIMATE:', JSON.stringify({
