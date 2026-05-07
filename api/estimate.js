@@ -424,9 +424,11 @@ export default async function handler(req, res) {
     // 6. Log to Supabase (always log, tag demo estimates)
     // -----------------------------------------------------------------------
     const monthKey = new Date().toISOString().slice(0, 7);
-    logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo, photoPaths, estimateId).catch(err => {
-      console.error('Background logging error:', err);
-    });
+    try {
+      await logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo, photoPaths, estimateId);
+    } catch (err) {
+      console.error('logEstimate error:', err?.message ?? err);
+    }
 
     // -----------------------------------------------------------------------
     // 6b. Generate signed URLs for photos (7-day expiry)
@@ -450,10 +452,16 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     const resendKey = process.env.RESEND_API_KEY;
     if (resendKey && customer.email) {
-      Promise.all([
-        sendLeadNotificationEmail(customer, lead, estimate, photoSignedUrls),
-        sendHomeownerEstimateEmail({ ...lead }, estimate, customer),
-      ]).catch(err => console.error('Email send failed:', err));
+      try {
+        await sendLeadNotificationEmail(customer, lead, estimate, photoSignedUrls);
+      } catch (err) {
+        console.error('Lead notification failed:', err?.message ?? err);
+      }
+      try {
+        await sendHomeownerEstimateEmail({ ...lead }, estimate, customer);
+      } catch (err) {
+        console.error('Homeowner email failed:', err?.message ?? err);
+      }
     }
 
     console.log('NEW ESTIMATE:', JSON.stringify({
