@@ -443,3 +443,30 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
 
   showSection(formSection);
 });
+
+// ---------------------------------------------------------------------------
+// Branding — fetch customer config and update header/CTA with business name
+// ---------------------------------------------------------------------------
+(async function applyBranding() {
+  try {
+    const resp = await fetch('/api/config');
+    if (!resp.ok) return;
+    const { businessName, phone } = await resp.json();
+
+    if (businessName) {
+      const logoName = document.querySelector('.logo-name');
+      if (logoName) logoName.textContent = businessName;
+      document.title = `Free Tree Estimate — ${businessName}`;
+    }
+
+    if (phone) {
+      const ctaBtn = document.getElementById('cta-call-btn');
+      if (ctaBtn) {
+        ctaBtn.href        = `tel:${phone}`;
+        ctaBtn.textContent = `📞 Call ${phone} — Book Your Free On-Site Visit`;
+      }
+    }
+  } catch {
+    // Silently fail — page works fine with default static content
+  }
+})();

@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TreeSnap Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0d0f;
+      --surface:  #14191e;
+      --border:   #1e2730;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --green:    #22c55e;
+      --green-d:  #166534;
+      --red:      #ef4444;
+      --yellow:   #eab308;
+      --blue:     #3b82f6;
+    }
+
+    body {
+      font-family: 'Geist', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ---- Header ---- */
+    .admin-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .admin-header h1 { font-size: 16px; font-weight: 700; color: var(--green); }
+    .admin-header .month-badge {
+      background: var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* ---- Login ---- */
+    #login-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - 56px);
+      gap: 16px;
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 32px;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .login-card h2 { font-size: 18px; font-weight: 600; }
+    .login-card input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .login-card input:focus { outline: none; border-color: var(--green); }
+    .login-error { color: var(--red); font-size: 13px; display: none; }
+
+    /* ---- Main ---- */
+    #admin-screen { display: none; padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+    /* ---- Stats row ---- */
+    .stats-row { display: flex; gap: 12px; margin-bottom: 24px; }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      min-width: 140px;
+    }
+    .stat-card .stat-label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .stat-card .stat-value { font-size: 24px; font-weight: 700; }
+
+    /* ---- Table ---- */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      padding: 10px 14px;
+      text-align: left;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    tbody tr.expanded { background: rgba(34,197,94,0.04); }
+    td { padding: 12px 14px; vertical-align: middle; }
+
+    /* ---- Status badges ---- */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge-trialing  { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .badge-active    { background: rgba(34,197,94,0.15);  color: #4ade80; }
+    .badge-past_due  { background: rgba(234,179,8,0.15);  color: #facc15; }
+    .badge-paused    { background: rgba(239,68,68,0.12);  color: #f87171; }
+    .badge-canceled  { background: rgba(100,116,139,0.15); color: #94a3b8; }
+
+    /* ---- Tier badges ---- */
+    .tier { color: var(--muted); font-size: 12px; }
+    .tier-pro     { color: #a78bfa; }
+    .tier-proplus { color: #f59e0b; }
+
+    /* ---- Usage bar ---- */
+    .usage-wrap { display: flex; align-items: center; gap: 8px; }
+    .usage-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 2px; max-width: 80px; }
+    .usage-bar-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width 0.3s; }
+    .usage-bar-fill.warn { background: var(--yellow); }
+    .usage-bar-fill.over { background: var(--red); }
+    .usage-text { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+    /* ---- Expand row ---- */
+    .detail-row { display: none; }
+    .detail-row.open { display: table-row; }
+    .detail-row td {
+      background: rgba(34,197,94,0.03);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      cursor: default;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px 24px;
+      margin-bottom: 16px;
+    }
+    .detail-item label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+    .detail-item span  { font-size: 13px; word-break: break-all; }
+
+    /* ---- Config section ---- */
+    .config-section {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+    }
+    .config-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; }
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px 20px;
+    }
+    .config-item label { display: block; color: var(--muted); font-size: 11px; }
+    .config-item span  { font-size: 13px; }
+
+    /* ---- Action buttons ---- */
+    .action-row { display: flex; gap: 8px; }
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--green); color: #000; }
+    .btn-danger  { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+    .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .btn-login   { background: var(--green); color: #000; width: 100%; padding: 10px; font-size: 14px; }
+
+    .action-feedback { font-size: 12px; color: var(--green); margin-left: 8px; }
+    .action-error    { font-size: 12px; color: var(--red); margin-left: 8px; }
+
+    .empty-state { padding: 48px; text-align: center; color: var(--muted); }
+    .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header class="admin-header">
+  <h1>TreeSnap Admin</h1>
+  <span class="month-badge" id="month-label"></span>
+</header>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="login-screen">
+  <div class="login-card">
+    <h2>Admin Login</h2>
+    <input type="password" id="password-input" placeholder="Admin password" autocomplete="current-password" />
+    <p class="login-error" id="login-error">Incorrect password</p>
+    <button class="btn btn-login" id="login-btn">Sign In</button>
+  </div>
+</div>
+
+<!-- ===================== ADMIN ===================== -->
+<div id="admin-screen">
+
+  <!-- Stats -->
+  <div class="stats-row" id="stats-row"></div>
+
+  <!-- Customer table -->
+  <div class="table-wrap">
+    <table id="customer-table">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Subdomain</th>
+          <th>Tier</th>
+          <th>Status</th>
+          <th>Trial End</th>
+          <th>This Month</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="customer-tbody">
+        <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+/* =====================================================================
+   TreeSnap Admin — vanilla JS, no frameworks
+   ===================================================================== */
+
+let adminPassword = '';
+let customersData  = [];
+
+// -----------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function escape(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function statusBadge(status) {
+  return `<span class="badge badge-${escape(status)}">${escape(status)}</span>`;
+}
+
+function tierLabel(tier) {
+  const map = { starter: 'Starter', pro: 'Pro', proplus: 'Pro+' };
+  const cls  = tier === 'proplus' ? 'tier-proplus' : tier === 'pro' ? 'tier-pro' : '';
+  return `<span class="tier ${cls}">${map[tier] || tier}</span>`;
+}
+
+function usageBar(count, limit) {
+  const isUnlimited = limit === 'Unlimited';
+  const pct = isUnlimited ? 0 : Math.min((count / Number(limit)) * 100, 100);
+  const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : '';
+  const bar = isUnlimited
+    ? `<div class="usage-bar-bg"><div class="usage-bar-fill" style="width:0%"></div></div>`
+    : `<div class="usage-bar-bg"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div></div>`;
+  return `<div class="usage-wrap">
+    ${bar}
+    <span class="usage-text">${count} / ${isUnlimited ? '∞' : limit}</span>
+  </div>`;
+}
+
+function monthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+// -----------------------------------------------------------------------
+// API calls
+// -----------------------------------------------------------------------
+async function apiGet() {
+  const resp = await fetch(`/api/admin?password=${encodeURIComponent(adminPassword)}`);
+  if (resp.status === 401) throw new Error('unauthorized');
+  if (!resp.ok) throw new Error('API error');
+  return resp.json();
+}
+
+async function apiPost(body) {
+  const resp = await fetch('/api/admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, password: adminPassword }),
+  });
+  if (resp.status === 401) throw new Error('unauthorized');
+  if (!resp.ok) {
+    const j = await resp.json().catch(() => ({}));
+    throw new Error(j.error || 'API error');
+  }
+  return resp.json();
+}
+
+// -----------------------------------------------------------------------
+// Login
+// -----------------------------------------------------------------------
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('password-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') login();
+});
+
+async function login() {
+  const pw = document.getElementById('password-input').value;
+  if (!pw) return;
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span>';
+
+  adminPassword = pw;
+
+  try {
+    const data = await apiGet();
+    document.getElementById('login-error').style.display = 'none';
+    showAdmin(data);
+  } catch (err) {
+    if (err.message === 'unauthorized') {
+      document.getElementById('login-error').style.display = 'block';
+    }
+    adminPassword = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+// -----------------------------------------------------------------------
+// Render admin panel
+// -----------------------------------------------------------------------
+function showAdmin(data) {
+  customersData = data.customers || [];
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('admin-screen').style.display = 'block';
+  document.getElementById('month-label').textContent = data.month_key || monthKey();
+  renderStats();
+  renderTable();
+}
+
+function renderStats() {
+  const total    = customersData.length;
+  const active   = customersData.filter(c => c.status === 'active').length;
+  const trialing = customersData.filter(c => c.status === 'trialing').length;
+  const pastDue  = customersData.filter(c => c.status === 'past_due').length;
+  const totalEst = customersData.reduce((sum, c) => sum + (c.estimates_this_month || 0), 0);
+
+  document.getElementById('stats-row').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total Customers</div><div class="stat-value">${total}</div></div>
+    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value" style="color:var(--green)">${active}</div></div>
+    <div class="stat-card"><div class="stat-label">Trialing</div><div class="stat-value" style="color:#60a5fa">${trialing}</div></div>
+    <div class="stat-card"><div class="stat-label">Past Due</div><div class="stat-value" style="color:var(--yellow)">${pastDue}</div></div>
+    <div class="stat-card"><div class="stat-label">Estimates This Month</div><div class="stat-value">${totalEst}</div></div>
+  `;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('customer-tbody');
+
+  if (!customersData.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No customers yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = customersData.map((c, i) => {
+    const detailId = `detail-${i}`;
+    const cfg = c.customer_config || {};
+
+    // Build config HTML
+    const configHtml = `
+      <div class="config-grid">
+        <div class="config-item"><label>Removal Rate</label><span>${cfg.base_rate_removal_low ? '$'+cfg.base_rate_removal_low+'–$'+cfg.base_rate_removal_high : '—'}</span></div>
+        <div class="config-item"><label>Trimming Rate</label><span>${cfg.base_rate_trimming_low ? '$'+cfg.base_rate_trimming_low+'–$'+cfg.base_rate_trimming_high : '—'}</span></div>
+        <div class="config-item"><label>Min Job</label><span>${cfg.minimum_job ? '$'+cfg.minimum_job : '—'}</span></div>
+        <div class="config-item"><label>Emergency Mult</label><span>${cfg.emergency_multiplier ?? '1.5'}x</span></div>
+        <div class="config-item"><label>Service Zips</label><span>${cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'All'}</span></div>
+        <div class="config-item"><label>Add-ons</label><span>${cfg.add_ons?.length ? cfg.add_ons.length+' configured' : 'Default'}</span></div>
+      </div>`;
+
+    // Can we extend trial?
+    const canExtend  = ['trialing', 'active'].includes(c.status) && !c.trial_extended;
+    const isPaused   = c.status === 'paused';
+    const canPause   = ['active', 'trialing', 'paused'].includes(c.status);
+    const pauseLabel = isPaused ? 'Unpause' : 'Pause';
+    const pauseClass = isPaused ? 'btn-primary' : 'btn-danger';
+
+    return `
+<tr class="customer-row" data-index="${i}" onclick="toggleDetail(${i})">
+  <td><strong>${escape(c.company_name)}</strong></td>
+  <td><code style="font-size:12px;color:var(--muted)">${escape(c.subdomain)}.treesnap.cloud</code></td>
+  <td>${tierLabel(c.tier)}</td>
+  <td>${statusBadge(c.status)}</td>
+  <td style="color:var(--muted)">${fmtDate(c.trial_end)}</td>
+  <td>${usageBar(c.estimates_this_month, c.monthly_limit)}</td>
+  <td style="color:var(--muted);font-size:18px;text-align:center;">›</td>
+</tr>
+<tr class="detail-row" id="${detailId}">
+  <td colspan="7">
+    <div class="detail-grid">
+      <div class="detail-item"><label>Owner</label><span>${escape(c.owner_name)}</span></div>
+      <div class="detail-item"><label>Email</label><span><a href="mailto:${escape(c.email)}" style="color:var(--green)">${escape(c.email)}</a></span></div>
+      <div class="detail-item"><label>Phone</label><span>${escape(c.phone || '—')}</span></div>
+      <div class="detail-item"><label>Business Name</label><span>${escape(c.business_name || c.company_name)}</span></div>
+      <div class="detail-item"><label>Stripe Customer ID</label><span style="font-size:12px;color:var(--muted)">${escape(c.stripe_customer_id || '—')}</span></div>
+      <div class="detail-item"><label>Stripe Subscription ID</label><span style="font-size:12px;color:var(--muted)">${escape(c.stripe_subscription_id || '—')}</span></div>
+      <div class="detail-item"><label>Trial Extended</label><span>${c.trial_extended ? 'Yes' : 'No'}</span></div>
+      <div class="detail-item"><label>Period End</label><span>${fmtDate(c.current_period_end)}</span></div>
+    </div>
+    <div class="config-section">
+      <h4>Pricing Config</h4>
+      ${configHtml}
+    </div>
+    <div class="action-row" id="actions-${i}">
+      ${canExtend ? `<button class="btn btn-outline" onclick="extendTrial('${escape(c.id)}',${i})">+7 Days Trial</button>` : ''}
+      ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
+      <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
+      <span class="action-error"    id="error-${i}"    style="display:none"></span>
+    </div>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+// -----------------------------------------------------------------------
+// Row expand/collapse
+// -----------------------------------------------------------------------
+function toggleDetail(i) {
+  const row = document.getElementById(`detail-${i}`);
+  const mainRow = document.querySelectorAll('.customer-row')[i];
+  const open = row.classList.toggle('open');
+  mainRow.classList.toggle('expanded', open);
+  const arrow = mainRow.querySelector('td:last-child');
+  arrow.textContent = open ? '⌄' : '›';
+}
+
+// -----------------------------------------------------------------------
+// Actions
+// -----------------------------------------------------------------------
+async function extendTrial(customerId, i) {
+  const btn = document.querySelector(`#actions-${i} .btn-outline`);
+  if (btn) btn.disabled = true;
+
+  try {
+    const result = await apiPost({ action: 'extend-trial', customerId });
+    showFeedback(i, `Trial extended to ${fmtDate(result.new_trial_end)}`);
+    // Update local data
+    customersData[i].trial_end = result.new_trial_end;
+    customersData[i].trial_extended = true;
+  } catch (err) {
+    showError(i, err.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function togglePause(customerId, i) {
+  const btns = document.querySelectorAll(`#actions-${i} .btn`);
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const result = await apiPost({ action: 'toggle-pause', customerId });
+    showFeedback(i, `Status changed to ${result.new_status}`);
+    customersData[i].status = result.new_status;
+    // Re-render after a brief delay to show the feedback
+    setTimeout(() => { renderTable(); }, 1200);
+  } catch (err) {
+    showError(i, err.message);
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+function showFeedback(i, msg) {
+  const el = document.getElementById(`feedback-${i}`);
+  if (el) { el.textContent = msg; el.style.display = 'inline'; }
+}
+
+function showError(i, msg) {
+  const el = document.getElementById(`error-${i}`);
+  if (el) { el.textContent = msg; el.style.display = 'inline'; }
+}
+</script>
+</body>
+</html>
