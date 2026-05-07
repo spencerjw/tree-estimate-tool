@@ -393,6 +393,19 @@ form.addEventListener('submit', async (e) => {
     const json = await response.json();
 
     if (!response.ok) {
+      // Photo validation failure — send user back to upload step with a clear message
+      if (response.status === 422 && json.validation_failed) {
+        stopLoading();
+        setPhotoError(json.error || 'We could not identify tree-related content in your photos. Please upload clear photos of the tree or damage you need assessed.');
+        // Clear uploaded photos so they have to re-upload
+        selectedFiles = [];
+        photoPreviews.innerHTML = '';
+        // Show form section again
+        showSection(formSection);
+        submitBtn.disabled = false;
+        submitLabel.textContent = 'Get My Free Estimate';
+        return;
+      }
       throw new Error(json.error || 'Unknown server error.');
     }
 
