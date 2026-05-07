@@ -16,13 +16,13 @@ const TIER_LIMITS = { starter: 50, pro: 250, proplus: Infinity };
 // ---------------------------------------------------------------------------
 const DEMO_CUSTOMER = {
   id: null,
-  business_name: 'TreePro Demo',
-  company_name: 'TreePro Demo',
-  owner_name: 'Demo Owner',
+  business_name: 'TreeSnap Demo',
+  company_name: 'TreeSnap Demo',
+  owner_name: 'Demo',
   email: process.env.DEFAULT_BUSINESS_EMAIL ?? '',
   phone: '',
   subdomain: 'demo',
-  tier: 'starter',
+  tier: 'proplus', // give demo all features
   status: 'active',
 };
 
@@ -185,8 +185,10 @@ The property is in zip code ${zip}. Return only the JSON estimate as described.`
 // ---------------------------------------------------------------------------
 // Supabase logging
 // ---------------------------------------------------------------------------
-async function logEstimate(customerId, lead, estimate, photoCount, monthKey) {
+// NOTE: requires `alter table estimates add column is_demo boolean default false;` in Supabase
+async function logEstimate(customerId, lead, estimate, photoCount, monthKey, isDemoEstimate = false) {
   const insertResult = await supabase.from('estimates').insert({
+    is_demo:         isDemoEstimate,
     customer_id:     customerId,
     homeowner_name:  lead.name,
     homeowner_email: lead.email,
@@ -204,13 +206,16 @@ async function logEstimate(customerId, lead, estimate, photoCount, monthKey) {
     console.error('Failed to log estimate:', insertResult.error);
   }
 
-  const rpcResult = await supabase.rpc('increment_estimate_count', {
-    p_customer_id: customerId,
-    p_month_key:   monthKey,
-  });
+  // Demo estimates don't count against tier usage limits
+  if (!isDemoEstimate) {
+    const rpcResult = await supabase.rpc('increment_estimate_count', {
+      p_customer_id: customerId,
+      p_month_key:   monthKey,
+    });
 
-  if (rpcResult.error) {
-    console.error('Failed to increment usage:', rpcResult.error);
+    if (rpcResult.error) {
+      console.error('Failed to increment usage:', rpcResult.error);
+    }
   }
 }
 
@@ -364,11 +369,11 @@ export default async function handler(req, res) {
     const lead = { name, email, phone, zip, serviceType, timestamp: new Date().toISOString() };
 
     // -----------------------------------------------------------------------
-    // 6. Log to Supabase (skip for demo)
+    // 6. Log to Supabase (always log, tag demo estimates)
     // -----------------------------------------------------------------------
-    if (!isDemo && customer.id) {
+    if (true) {
       const monthKey = new Date().toISOString().slice(0, 7);
-      logEstimate(customer.id, lead, estimate, images.length, monthKey).catch(err => {
+      logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo).catch(err => {
         console.error('Background logging error:', err);
       });
     }
