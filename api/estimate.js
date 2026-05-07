@@ -383,10 +383,12 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     const resendKey = process.env.RESEND_API_KEY;
     if (resendKey && customer.email) {
-      Promise.all([
-        sendLeadNotificationEmail(customer, lead, estimate),
-        sendHomeownerEstimateEmail({ ...lead }, estimate, customer),
-      ]).catch(err => console.error('Email send failed:', err));
+      sendLeadNotificationEmail(customer, lead, estimate)
+        .then(() => console.log('Lead notification sent to:', customer.email))
+        .catch(err => console.error('Lead notification failed:', err?.message ?? err));
+      sendHomeownerEstimateEmail({ ...lead }, estimate, customer)
+        .then(() => console.log('Homeowner email sent to:', lead.email))
+        .catch(err => console.error('Homeowner email failed:', err?.message ?? err));
     }
 
     console.log('NEW ESTIMATE:', JSON.stringify({
