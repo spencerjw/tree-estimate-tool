@@ -373,11 +373,11 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     // 6. Log to Supabase (always log, tag demo estimates)
     // -----------------------------------------------------------------------
-    if (true) {
-      const monthKey = new Date().toISOString().slice(0, 7);
-      logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo).catch(err => {
-        console.error('Background logging error:', err);
-      });
+    const monthKey = new Date().toISOString().slice(0, 7);
+    try {
+      await logEstimate(customer.id, lead, estimate, images.length, monthKey, isDemo);
+    } catch (err) {
+      console.error('logEstimate error:', err?.message ?? err);
     }
 
     // -----------------------------------------------------------------------
@@ -385,12 +385,18 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     const resendKey = process.env.RESEND_API_KEY;
     if (resendKey && customer.email) {
-      sendLeadNotificationEmail(customer, lead, estimate)
-        .then(() => console.log('Lead notification sent to:', customer.email))
-        .catch(err => console.error('Lead notification failed:', err?.message ?? err));
-      sendHomeownerEstimateEmail({ ...lead }, estimate, customer)
-        .then(() => console.log('Homeowner email sent to:', lead.email))
-        .catch(err => console.error('Homeowner email failed:', err?.message ?? err));
+      try {
+        await sendLeadNotificationEmail(customer, lead, estimate);
+        console.log('Lead notification sent to:', customer.email);
+      } catch (err) {
+        console.error('Lead notification failed:', err?.message ?? err);
+      }
+      try {
+        await sendHomeownerEstimateEmail({ ...lead }, estimate, customer);
+        console.log('Homeowner email sent to:', lead.email);
+      } catch (err) {
+        console.error('Homeowner email failed:', err?.message ?? err);
+      }
     }
 
     console.log('NEW ESTIMATE:', JSON.stringify({
