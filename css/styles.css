@@ -284,6 +284,21 @@ input.invalid {
   font-family: var(--font-mono);
 }
 
+/* Photo validation error — styled alert box matching safety warnings */
+#photo-error:not(:empty) {
+  display: block;
+  background: var(--red-bg);
+  border: 1px solid var(--red-border);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-top: 10px;
+  font-size: 0.875rem;
+  color: #fca5a5;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+
 /* ---------- Service selector ---------- */
 .service-grid {
   display: grid;
