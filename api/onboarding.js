@@ -46,11 +46,11 @@ export default async function handler(req, res) {
     if (isExpired(lead)) return res.status(410).json({ error: 'token_expired' });
 
     return res.status(200).json({
-      company_name: lead.company_name,
-      owner_name:   lead.owner_name,
+      company_name: lead.company,
+      owner_name:   lead.name,
       email:        lead.email,
       phone:        lead.phone,
-      subdomain:    lead.desired_subdomain,
+      subdomain:    lead.subdomain,
       tier:         lead.tier,
     });
   }
@@ -106,7 +106,7 @@ export default async function handler(req, res) {
       .update({
         onboarding_config:       onboardingConfig,
         onboarding_completed_at: new Date().toISOString(),
-        company_name:            business_name,
+        company:                 business_name,
         phone,
       })
       .eq('id', lead.id);
