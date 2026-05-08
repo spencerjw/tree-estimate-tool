@@ -355,6 +355,23 @@
 
 </div>
 
+<!-- Extend trial modal -->
+<div class="modal-overlay" id="extend-modal">
+  <div class="modal">
+    <h3>Extend Trial</h3>
+    <p style="color:var(--muted);font-size:13px;">Current trial end: <strong id="extend-current-end" style="color:var(--text)"></strong></p>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Extend by (days)</label>
+      <input type="number" id="extend-days" value="14" min="1" max="90"
+             style="padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;font-family:inherit;width:100%;" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeExtendModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmExtend()">Extend Trial</button>
+    </div>
+  </div>
+</div>
+
 <!-- Reject reason modal -->
 <div class="modal-overlay" id="reject-modal">
   <div class="modal">
@@ -562,7 +579,7 @@ function renderTable() {
       </div>`;
 
     // Can we extend trial?
-    const canExtend  = ['trialing', 'active'].includes(c.status) && !c.trial_extended;
+    const canExtend  = ['trialing', 'active'].includes(c.status);
     const isPaused   = c.status === 'paused';
     const canPause   = ['active', 'trialing', 'paused'].includes(c.status);
     const pauseLabel = isPaused ? 'Unpause' : 'Pause';
@@ -601,7 +618,7 @@ function renderTable() {
       ${configHtml}
     </div>
     <div class="action-row" id="actions-${i}">
-      ${canExtend ? `<button class="btn btn-outline" onclick="extendTrial('${escape(c.id)}',${i})">+7 Days Trial</button>` : ''}
+      ${canExtend ? `<button class="btn btn-outline" onclick="openExtendModal('${escape(c.id)}',${i},'${escape(c.trial_end)}')">Extend Trial</button>` : ''}
       ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
       ${upgradeBtns}
       <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
@@ -627,19 +644,52 @@ function toggleDetail(i) {
 // -----------------------------------------------------------------------
 // Actions
 // -----------------------------------------------------------------------
-async function extendTrial(customerId, i) {
-  const btn = document.querySelector(`#actions-${i} .btn-outline`);
-  if (btn) btn.disabled = true;
+let extendCustomerId = null;
+let extendRowIndex   = null;
+
+function openExtendModal(customerId, rowIndex, trialEnd) {
+  extendCustomerId = customerId;
+  extendRowIndex   = rowIndex;
+  document.getElementById('extend-current-end').textContent = fmtDate(trialEnd) || '—';
+  document.getElementById('extend-days').value = '14';
+  document.getElementById('extend-modal').classList.add('open');
+  setTimeout(() => document.getElementById('extend-days').focus(), 50);
+}
+
+function closeExtendModal() {
+  extendCustomerId = null;
+  extendRowIndex   = null;
+  document.getElementById('extend-modal').classList.remove('open');
+}
+
+async function confirmExtend() {
+  const days = parseInt(document.getElementById('extend-days').value, 10);
+  if (!days || days < 1 || days > 90) {
+    document.getElementById('extend-days').style.borderColor = 'var(--red)';
+    return;
+  }
+  document.getElementById('extend-days').style.borderColor = '';
+
+  const customerId = extendCustomerId;
+  const rowIndex   = extendRowIndex;
+  closeExtendModal();
 
   try {
-    const result = await apiPost({ action: 'extend-trial', customerId });
-    showFeedback(i, `Trial extended to ${fmtDate(result.new_trial_end)}`);
-    // Update local data
-    customersData[i].trial_end = result.new_trial_end;
-    customersData[i].trial_extended = true;
+    const result = await apiPost(
+      { customer_id: customerId, days },
+      '/api/admin/extend-trial'
+    );
+    showFeedback(rowIndex, `Trial extended to ${fmtDate(result.new_trial_end)}`);
+    customersData[rowIndex].trial_end      = result.new_trial_end;
+    customersData[rowIndex].trial_extended = true;
+    // Update the trial end cell in the main row without a full re-render
+    const rows = document.querySelectorAll('.customer-row');
+    if (rows[rowIndex]) {
+      const trialCell = rows[rowIndex].querySelector('td:nth-child(5)');
+      if (trialCell) trialCell.textContent = fmtDate(result.new_trial_end);
+    }
   } catch (err) {
-    showError(i, err.message);
-    if (btn) btn.disabled = false;
+    showError(rowIndex, err.message);
   }
 }
 
