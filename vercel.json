@@ -5,11 +5,19 @@
       "schedule": "0 6 * * *"
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/",
+      "src": "^/$",
       "has": [{ "type": "host", "value": "admin.treesnap.cloud" }],
-      "destination": "/admin.html"
+      "dest": "/admin.html"
+    },
+    {
+      "src": "^/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "^/(.*)",
+      "dest": "/$1"
     }
   ]
 }
