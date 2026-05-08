@@ -373,10 +373,23 @@
    TreeSnap Admin — vanilla JS, no frameworks
    ===================================================================== */
 
-let adminPassword = '';
+let adminPassword = sessionStorage.getItem('adminPassword') || '';
 let customersData  = [];
 let leadsData      = [];
 let rejectLeadId   = null;
+
+// Auto-login if password is in sessionStorage
+if (adminPassword) {
+  (async () => {
+    try {
+      const data = await apiGet();
+      showAdmin(data);
+    } catch (err) {
+      adminPassword = '';
+      sessionStorage.removeItem('adminPassword');
+    }
+  })();
+}
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -463,11 +476,13 @@ async function login() {
 
   try {
     const data = await apiGet();
+    sessionStorage.setItem('adminPassword', pw);
     document.getElementById('login-error').style.display = 'none';
     showAdmin(data);
   } catch (err) {
     if (err.message === 'unauthorized') {
       document.getElementById('login-error').style.display = 'block';
+      sessionStorage.removeItem('adminPassword');
     }
     adminPassword = '';
   } finally {
