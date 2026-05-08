@@ -24,14 +24,14 @@ export default async function handler(req, res) {
   const host = req.headers.host ?? '';
 
   if (isDemoHost(host)) {
-    return res.status(200).json({ businessName: 'TreePro Demo', phone: '', logoUrl: null });
+    return res.status(200).json({ businessName: 'TreePro Demo', phone: '' });
   }
 
   const subdomain = host.split('.')[0].toLowerCase();
 
   const { data: customer } = await supabase
     .from('customers')
-    .select('business_name, company_name, phone, logo_url, status')
+    .select('business_name, company_name, phone, status')
     .eq('subdomain', subdomain)
     .single();
 
@@ -42,7 +42,6 @@ export default async function handler(req, res) {
   return res.status(200).json({
     businessName: customer.business_name || customer.company_name || 'Tree Service',
     phone: customer.phone || '',
-    logoUrl: customer.logo_url || null,
     status: customer.status,
   });
 }
