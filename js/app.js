@@ -456,6 +456,8 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
     if (businessName) {
       const logoName = document.querySelector('.logo-name');
       if (logoName) logoName.textContent = businessName;
+      const footerCompany = document.getElementById('footer-company');
+      if (footerCompany) footerCompany.textContent = businessName;
       document.title = `Free Tree Estimate — ${businessName}`;
     }
 
