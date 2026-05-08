@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
   const { data: customer } = await supabase
     .from('customers')
-    .select('business_name, company_name, phone, status')
+    .select('business_name, company_name, phone, status, customer_config(theme)')
     .eq('subdomain', subdomain)
     .single();
 
@@ -41,7 +41,8 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     businessName: customer.business_name || customer.company_name || 'Tree Service',
-    phone: customer.phone || '',
-    status: customer.status,
+    phone:        customer.phone || '',
+    status:       customer.status,
+    theme:        customer.customer_config?.theme || 'forest-green',
   });
 }

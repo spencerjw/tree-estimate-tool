@@ -451,7 +451,25 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
   try {
     const resp = await fetch('/api/config');
     if (!resp.ok) return;
-    const { businessName, phone } = await resp.json();
+    const { businessName, phone, theme } = await resp.json();
+
+    if (theme && theme !== 'forest-green') {
+      const THEMES = {
+        'deep-navy':      { main: '#3b82f6', hover: '#1d4ed8', soft: 'rgba(59,130,246,0.12)',  glow: 'rgba(59,130,246,0.25)'  },
+        'slate-gray':     { main: '#64748b', hover: '#475569', soft: 'rgba(100,116,139,0.12)', glow: 'rgba(100,116,139,0.25)' },
+        'burnt-orange':   { main: '#f97316', hover: '#ea580c', soft: 'rgba(249,115,22,0.12)',  glow: 'rgba(249,115,22,0.25)'  },
+        'burgundy-red':   { main: '#e11d48', hover: '#9f1239', soft: 'rgba(225,29,72,0.12)',   glow: 'rgba(225,29,72,0.25)'   },
+        'charcoal-black': { main: '#6b7280', hover: '#4b5563', soft: 'rgba(107,114,128,0.12)', glow: 'rgba(107,114,128,0.25)' },
+      };
+      const t = THEMES[theme];
+      if (t) {
+        const root = document.documentElement;
+        root.style.setProperty('--green',       t.main);
+        root.style.setProperty('--green-hover',  t.hover);
+        root.style.setProperty('--green-soft',   t.soft);
+        root.style.setProperty('--green-glow',   t.glow);
+      }
+    }
 
     if (businessName) {
       const logoName = document.querySelector('.logo-name');
