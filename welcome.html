@@ -5,84 +5,114 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Welcome to TreeSnap</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-body:    #0a0d0f;
+      --bg-card:    #14191e;
+      --border:     rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.14);
+      --text-1:     #e8edf2;
+      --text-2:     #b6bfc8;
+      --text-3:     #7c858f;
+      --green:      #22c55e;
+      --green-soft: rgba(34,197,94,0.12);
+      --green-border: rgba(34,197,94,0.30);
+    }
+
     body {
       font-family: 'Geist', sans-serif;
-      background: #f0fdf4;
+      background: var(--bg-body);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 24px;
-      color: #111;
+      color: var(--text-1);
     }
+
     .card {
-      background: #fff;
-      border: 1px solid #bbf7d0;
-      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.035) 0%, transparent 60%), var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
       padding: 48px 40px;
       max-width: 520px;
       width: 100%;
       text-align: center;
-      box-shadow: 0 4px 24px rgba(22,101,52,0.08);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
     }
+
     .logo {
-      display: inline-block;
-      background: #166534;
-      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       font-weight: 700;
       font-size: 18px;
-      padding: 8px 20px;
-      border-radius: 6px;
+      color: var(--text-1);
       margin-bottom: 32px;
+      font-family: 'Geist Mono', monospace;
+      letter-spacing: -0.5px;
     }
+
+    .logo span { color: var(--green); }
+
     .icon {
       font-size: 56px;
       line-height: 1;
       margin-bottom: 20px;
     }
+
     h1 {
       font-size: 26px;
-      font-weight: 700;
-      color: #166534;
+      font-weight: 800;
+      color: var(--text-1);
       margin-bottom: 12px;
+      letter-spacing: -0.5px;
     }
+
     .subtitle {
-      color: #6b7280;
+      color: var(--text-2);
       font-size: 15px;
       margin-bottom: 28px;
       line-height: 1.6;
     }
+
     .info-box {
-      background: #f0fdf4;
-      border: 1px solid #bbf7d0;
+      background: var(--green-soft);
+      border: 1px solid var(--green-border);
       border-radius: 8px;
-      padding: 20px 24px;
+      padding: 16px 20px;
       margin-bottom: 24px;
       text-align: left;
     }
-    .info-box p { font-size: 14px; color: #374151; line-height: 1.7; }
-    .info-box strong { color: #166534; }
+
+    .info-box p { font-size: 14px; color: var(--text-2); line-height: 1.7; }
+    .info-box strong { color: var(--green); }
+
     .steps {
       text-align: left;
       margin-bottom: 28px;
     }
+
     .step {
       display: flex;
       align-items: flex-start;
       gap: 14px;
       padding: 12px 0;
-      border-bottom: 1px solid #e5e7eb;
+      border-bottom: 1px solid var(--border);
     }
+
     .step:last-child { border-bottom: none; }
+
     .step-num {
       flex-shrink: 0;
       width: 28px;
       height: 28px;
-      background: #166534;
+      background: var(--green);
       color: #fff;
       border-radius: 50%;
       display: flex;
@@ -91,37 +121,47 @@
       font-size: 13px;
       font-weight: 700;
     }
-    .step-text { font-size: 14px; color: #374151; padding-top: 4px; }
+
+    .step-text {
+      font-size: 14px;
+      color: var(--text-2);
+      padding-top: 4px;
+      line-height: 1.5;
+    }
+
     .note {
       font-size: 13px;
-      color: #9ca3af;
+      color: var(--text-3);
       line-height: 1.6;
     }
+
+    .note a { color: var(--green); text-decoration: none; }
+    .note a:hover { text-decoration: underline; }
+
     #upgrade-msg { display: none; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo">TreeSnap</div>
+    <div class="logo">Tree<span>Snap</span></div>
     <div class="icon">🌳</div>
     <h1 id="main-heading">Payment Received!</h1>
     <p class="subtitle" id="main-subtitle">
       Your TreeSnap setup is underway. You'll receive an email at the address you provided once your tool is live — typically within a few minutes.
     </p>
 
-    <!-- New signup content -->
     <div id="signup-msg">
       <div class="info-box">
         <p>
           <strong>What happens next:</strong><br>
-          We're provisioning your subdomain, configuring your estimate tool, and starting your 30-day free trial.
+          We're provisioning your subdomain, configuring your estimate tool, and starting your 30-day billing period.
           Look for a welcome email with your tool URL and everything you need to get started.
         </p>
       </div>
       <div class="steps">
         <div class="step">
           <div class="step-num">1</div>
-          <div class="step-text">Check your inbox — your welcome email will arrive within 5 minutes.</div>
+          <div class="step-text">Check your inbox — your welcome email will arrive within a few minutes.</div>
         </div>
         <div class="step">
           <div class="step-num">2</div>
@@ -129,29 +169,27 @@
         </div>
         <div class="step">
           <div class="step-num">3</div>
-          <div class="step-text">Receive email notifications for every estimate submission with the homeowner's contact info.</div>
+          <div class="step-text">Receive email notifications for every estimate submission with the homeowner's full contact info.</div>
         </div>
       </div>
     </div>
 
-    <!-- Upgrade content -->
     <div id="upgrade-msg">
       <div class="info-box">
         <p>
           <strong>Upgrade complete!</strong><br>
-          Your plan has been upgraded. The change takes effect at your next billing cycle.
+          Your plan has been upgraded. The change takes effect immediately.
           You'll receive a confirmation email shortly.
         </p>
       </div>
     </div>
 
-    <p class="note">Questions? Email us at <a href="mailto:hello@treesnap.cloud" style="color:#166534;">hello@treesnap.cloud</a></p>
+    <p class="note">Questions? Email us at <a href="mailto:hello@treesnap.cloud">hello@treesnap.cloud</a></p>
   </div>
 
   <script>
     const params  = new URLSearchParams(location.search);
     const upgrade = params.get('upgrade') === '1';
-
     if (upgrade) {
       document.getElementById('main-heading').textContent  = 'Upgrade Successful!';
       document.getElementById('main-subtitle').textContent = 'Your plan upgrade is being processed. You\'ll receive a confirmation email shortly.';
