@@ -16,8 +16,12 @@
       "dest": "/api/$1"
     },
     {
-      "src": "^/(.*)",
-      "dest": "/$1"
+      "src": "^/welcome$",
+      "dest": "/welcome.html"
+    },
+    {
+      "src": "^/admin$",
+      "dest": "/admin.html"
     }
   ]
 }
