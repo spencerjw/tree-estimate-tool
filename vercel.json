@@ -5,12 +5,11 @@
       "schedule": "0 6 * * *"
     }
   ],
-  "redirects": [
+  "rewrites": [
     {
       "source": "/",
       "has": [{ "type": "host", "value": "admin.treesnap.cloud" }],
-      "destination": "/admin",
-      "permanent": false
+      "destination": "/admin.html"
     }
   ]
 }
