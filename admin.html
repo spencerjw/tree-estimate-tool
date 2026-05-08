@@ -215,6 +215,69 @@
     .empty-state { padding: 48px; text-align: center; color: var(--muted); }
     .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Tabs ---- */
+    .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      font-family: inherit;
+      transition: color 0.15s;
+    }
+    .tab.active { color: var(--green); border-bottom-color: var(--green); }
+    .tab-panel  { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ---- Leads tab ---- */
+    .badge-pending    { background: rgba(59,130,246,0.15);  color: #60a5fa; }
+    .badge-approved   { background: rgba(234,179,8,0.15);   color: #facc15; }
+    .badge-provisioned{ background: rgba(34,197,94,0.15);   color: #4ade80; }
+    .badge-rejected   { background: rgba(100,116,139,0.15); color: #94a3b8; }
+
+    /* ---- Reject modal ---- */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+      width: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .modal h3 { font-size: 16px; font-weight: 600; }
+    .modal textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 80px;
+    }
+    .modal textarea:focus { outline: none; border-color: var(--red); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -240,26 +303,69 @@
   <!-- Stats -->
   <div class="stats-row" id="stats-row"></div>
 
-  <!-- Customer table -->
-  <div class="table-wrap">
-    <table id="customer-table">
-      <thead>
-        <tr>
-          <th>Company</th>
-          <th>Subdomain</th>
-          <th>Tier</th>
-          <th>Status</th>
-          <th>Trial End</th>
-          <th>This Month</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="customer-tbody">
-        <tr><td colspan="7" class="empty-state">Loading…</td></tr>
-      </tbody>
-    </table>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('customers')">Customers</button>
+    <button class="tab"        onclick="switchTab('leads')">Leads <span id="leads-badge"></span></button>
   </div>
 
+  <!-- Customers tab -->
+  <div class="tab-panel active" id="tab-customers">
+    <div class="table-wrap">
+      <table id="customer-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Subdomain</th>
+            <th>Tier</th>
+            <th>Status</th>
+            <th>Trial End</th>
+            <th>This Month</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="customer-tbody">
+          <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Leads tab -->
+  <div class="tab-panel" id="tab-leads">
+    <div class="table-wrap">
+      <table id="leads-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Company</th>
+            <th>Subdomain</th>
+            <th>Tier</th>
+            <th>Status</th>
+            <th>Submitted</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="leads-tbody">
+          <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Reject reason modal -->
+<div class="modal-overlay" id="reject-modal">
+  <div class="modal">
+    <h3>Reject Lead</h3>
+    <p style="color:var(--muted);font-size:13px;">Optionally provide a reason that will be included in the rejection email.</p>
+    <textarea id="reject-reason" placeholder="Reason (optional)"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeRejectModal()">Cancel</button>
+      <button class="btn btn-danger"  onclick="confirmReject()">Send Rejection</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -269,6 +375,8 @@
 
 let adminPassword = '';
 let customersData  = [];
+let leadsData      = [];
+let rejectLeadId   = null;
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -320,11 +428,12 @@ async function apiGet() {
   return resp.json();
 }
 
-async function apiPost(body) {
-  const resp = await fetch('/api/admin', {
-    method: 'POST',
+async function apiPost(body, endpoint) {
+  const url  = endpoint || '/api/admin';
+  const resp = await fetch(url, {
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...body, password: adminPassword }),
+    body:    JSON.stringify({ ...body, password: adminPassword }),
   });
   if (resp.status === 401) throw new Error('unauthorized');
   if (!resp.ok) {
@@ -372,11 +481,24 @@ async function login() {
 // -----------------------------------------------------------------------
 function showAdmin(data) {
   customersData = data.customers || [];
+  leadsData     = data.leads     || [];
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('admin-screen').style.display = 'block';
   document.getElementById('month-label').textContent = data.month_key || monthKey();
   renderStats();
   renderTable();
+  renderLeads();
+}
+
+// -----------------------------------------------------------------------
+// Tab switching
+// -----------------------------------------------------------------------
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['customers', 'leads'][i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
 }
 
 function renderStats() {
@@ -386,13 +508,19 @@ function renderStats() {
   const pastDue  = customersData.filter(c => c.status === 'past_due').length;
   const totalEst = customersData.reduce((sum, c) => sum + (c.estimates_this_month || 0), 0);
 
+  const pendingLeads = leadsData.filter(l => l.status === 'pending').length;
+
   document.getElementById('stats-row').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total Customers</div><div class="stat-value">${total}</div></div>
     <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value" style="color:var(--green)">${active}</div></div>
     <div class="stat-card"><div class="stat-label">Trialing</div><div class="stat-value" style="color:#60a5fa">${trialing}</div></div>
     <div class="stat-card"><div class="stat-label">Past Due</div><div class="stat-value" style="color:var(--yellow)">${pastDue}</div></div>
     <div class="stat-card"><div class="stat-label">Estimates This Month</div><div class="stat-value">${totalEst}</div></div>
+    <div class="stat-card"><div class="stat-label">Pending Leads</div><div class="stat-value" style="color:#a78bfa">${pendingLeads}</div></div>
   `;
+
+  const badge = document.getElementById('leads-badge');
+  if (badge) badge.textContent = pendingLeads > 0 ? `(${pendingLeads})` : '';
 }
 
 function renderTable() {
@@ -425,6 +553,12 @@ function renderTable() {
     const pauseLabel = isPaused ? 'Unpause' : 'Pause';
     const pauseClass = isPaused ? 'btn-primary' : 'btn-danger';
 
+    // Upgrade options
+    const upgradeOptions = { starter: ['pro', 'proplus'], pro: ['proplus'], proplus: [] }[c.tier] || [];
+    const upgradeBtns = upgradeOptions.map(t =>
+      `<button class="btn btn-outline" onclick="sendUpgrade('${escape(c.id)}',${i},'${t}')">Upgrade → ${tierLabel(t).replace(/<[^>]+>/g,'')}</button>`
+    ).join('');
+
     return `
 <tr class="customer-row" data-index="${i}" onclick="toggleDetail(${i})">
   <td><strong>${escape(c.company_name)}</strong></td>
@@ -454,6 +588,7 @@ function renderTable() {
     <div class="action-row" id="actions-${i}">
       ${canExtend ? `<button class="btn btn-outline" onclick="extendTrial('${escape(c.id)}',${i})">+7 Days Trial</button>` : ''}
       ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
+      ${upgradeBtns}
       <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
       <span class="action-error"    id="error-${i}"    style="display:none"></span>
     </div>
@@ -517,6 +652,105 @@ function showFeedback(i, msg) {
 function showError(i, msg) {
   const el = document.getElementById(`error-${i}`);
   if (el) { el.textContent = msg; el.style.display = 'inline'; }
+}
+
+// -----------------------------------------------------------------------
+// Leads
+// -----------------------------------------------------------------------
+function renderLeads() {
+  const tbody = document.getElementById('leads-tbody');
+  if (!leadsData.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No leads yet.</td></tr>';
+    return;
+  }
+
+  const TIER_LABELS = { starter: 'Starter', pro: 'Pro', proplus: 'Pro+' };
+
+  tbody.innerHTML = leadsData.map((l, i) => {
+    const isPending  = l.status === 'pending';
+    const isApproved = l.status === 'approved';
+    const actionsHtml = isPending
+      ? `<button class="btn btn-primary" onclick="approveLead('${escape(l.id)}',${i})">Approve</button>
+         <button class="btn btn-danger"  onclick="openRejectModal('${escape(l.id)}')">Reject</button>`
+      : `<span style="color:var(--muted);font-size:12px;">${escape(l.status)}</span>`;
+
+    return `
+<tr>
+  <td>
+    <strong>${escape(l.name)}</strong><br>
+    <span style="color:var(--muted);font-size:12px;">${escape(l.email)}</span><br>
+    <span style="color:var(--muted);font-size:12px;">${escape(l.phone)}</span>
+  </td>
+  <td>${escape(l.company)}</td>
+  <td><code style="font-size:12px;color:var(--muted)">${escape(l.subdomain)}.treesnap.cloud</code></td>
+  <td>${TIER_LABELS[l.tier] || l.tier}</td>
+  <td><span class="badge badge-${escape(l.status)}">${escape(l.status)}</span></td>
+  <td style="color:var(--muted);font-size:12px;">${fmtDate(l.created_at)}</td>
+  <td>
+    <div style="display:flex;gap:6px;align-items:center;" id="lead-actions-${i}">
+      ${actionsHtml}
+      <span class="action-feedback" id="lead-feedback-${i}" style="display:none"></span>
+      <span class="action-error"    id="lead-error-${i}"    style="display:none"></span>
+    </div>
+  </td>
+</tr>`;
+  }).join('');
+}
+
+async function approveLead(leadId, i) {
+  const container = document.getElementById(`lead-actions-${i}`);
+  const btns = container?.querySelectorAll('.btn');
+  btns?.forEach(b => b.disabled = true);
+
+  try {
+    await apiPost({ leadId }, '/api/admin/approve-lead');
+    const fb = document.getElementById(`lead-feedback-${i}`);
+    if (fb) { fb.textContent = 'Approved — checkout link sent'; fb.style.display = 'inline'; }
+    leadsData[i].status = 'approved';
+    setTimeout(() => renderLeads(), 1500);
+  } catch (err) {
+    const eb = document.getElementById(`lead-error-${i}`);
+    if (eb) { eb.textContent = err.message; eb.style.display = 'inline'; }
+    btns?.forEach(b => b.disabled = false);
+  }
+}
+
+function openRejectModal(leadId) {
+  rejectLeadId = leadId;
+  document.getElementById('reject-reason').value = '';
+  document.getElementById('reject-modal').classList.add('open');
+}
+
+function closeRejectModal() {
+  rejectLeadId = null;
+  document.getElementById('reject-modal').classList.remove('open');
+}
+
+async function confirmReject() {
+  if (!rejectLeadId) return;
+  const reason = document.getElementById('reject-reason').value.trim();
+  const leadId = rejectLeadId;
+  closeRejectModal();
+
+  try {
+    await apiPost({ leadId, reason }, '/api/admin/reject-lead');
+    const idx = leadsData.findIndex(l => l.id === leadId);
+    if (idx !== -1) { leadsData[idx].status = 'rejected'; renderLeads(); }
+  } catch (err) {
+    alert('Reject failed: ' + err.message);
+  }
+}
+
+async function sendUpgrade(customerId, i, targetTier) {
+  const feedback = document.getElementById(`feedback-${i}`);
+  const errEl    = document.getElementById(`error-${i}`);
+
+  try {
+    await apiPost({ customerId, targetTier }, '/api/admin/upgrade-customer');
+    if (feedback) { feedback.textContent = 'Upgrade email sent'; feedback.style.display = 'inline'; }
+  } catch (err) {
+    if (errEl) { errEl.textContent = err.message; errEl.style.display = 'inline'; }
+  }
 }
 </script>
 </body>

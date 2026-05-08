@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const monthKey = new Date().toISOString().slice(0, 7);
 
-    const [customersResult, usageResult] = await Promise.all([
+    const [customersResult, usageResult, leadsResult] = await Promise.all([
       supabase
         .from('customers')
         .select('*, customer_config(*)')
@@ -40,6 +40,10 @@ export default async function handler(req, res) {
         .from('monthly_usage')
         .select('customer_id, estimate_count')
         .eq('month_key', monthKey),
+      supabase
+        .from('leads')
+        .select('*')
+        .order('created_at', { ascending: false }),
     ]);
 
     if (customersResult.error) {
@@ -57,7 +61,9 @@ export default async function handler(req, res) {
       monthly_limit: TIER_LIMITS[c.tier] ?? 50,
     }));
 
-    return res.status(200).json({ customers, month_key: monthKey });
+    const leads = leadsResult.data ?? [];
+
+    return res.status(200).json({ customers, leads, month_key: monthKey });
   }
 
   // -------------------------------------------------------------------------

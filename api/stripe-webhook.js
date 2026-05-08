@@ -3,6 +3,7 @@
 
 import Stripe from 'stripe';
 import { supabase } from '../lib/supabase.js';
+import { provisionCustomer } from '../lib/provision.js';
 import {
   sendTrialEndingEmail,
   sendSubscriptionStartedEmail,
@@ -12,6 +13,13 @@ import {
 
 export const config = {
   api: { bodyParser: false },
+};
+
+// Stripe monthly price ID → TreeSnap tier (also used for upgrade swaps)
+const MONTHLY_PRICE_IDS = {
+  starter: 'price_1TUSnhK2K8Vtuj3t4JNdUWpH',
+  pro:     'price_1TUSniK2K8Vtuj3tuy9DaHtP',
+  proplus: 'price_1TUSniK2K8Vtuj3tfZTjKOPH',
 };
 
 // Stripe price ID → TreeSnap tier
@@ -194,6 +202,69 @@ export default async function handler(req, res) {
         if (customer) {
           await sendPaymentFailedEmail(customer);
           await logEmail(customer.id, 'payment_failed', customer.email);
+        }
+        break;
+      }
+
+      // ----------------------------------------------------------------------
+      // Setup-fee or upgrade-fee checkout completed — provision or upgrade
+      // ----------------------------------------------------------------------
+      case 'checkout.session.completed': {
+        const session    = event.data.object;
+        const { lead_id, customer_id, action, target_tier } = session.metadata ?? {};
+
+        if (action === 'upgrade' && customer_id && target_tier) {
+          // Upgrade flow — swap subscription price and update tier in Supabase
+          const { data: customer } = await supabase
+            .from('customers')
+            .select('*')
+            .eq('id', customer_id)
+            .single();
+
+          if (!customer) {
+            console.error('Upgrade: customer not found', customer_id);
+            break;
+          }
+
+          const newPriceId = MONTHLY_PRICE_IDS[target_tier];
+          if (!newPriceId) {
+            console.error('Upgrade: unknown target tier', target_tier);
+            break;
+          }
+
+          const sub = await stripe.subscriptions.retrieve(customer.stripe_subscription_id);
+          await stripe.subscriptions.update(sub.id, {
+            items:               [{ id: sub.items.data[0].id, price: newPriceId }],
+            proration_behavior:  'none',
+          });
+
+          await supabase
+            .from('customers')
+            .update({ tier: target_tier })
+            .eq('id', customer_id);
+
+          console.log(`Upgraded customer ${customer_id} → ${target_tier}`);
+
+        } else if (lead_id) {
+          // New signup flow — provision the customer
+          const { data: lead } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('id', lead_id)
+            .single();
+
+          if (!lead) {
+            console.error('Provision: lead not found', lead_id);
+            break;
+          }
+
+          if (lead.status === 'provisioned') {
+            console.log('Provision: already done, skipping duplicate webhook', lead_id);
+            break;
+          }
+
+          await provisionCustomer(lead);
+          console.log(`Provisioned customer for lead ${lead_id}`);
         }
         break;
       }
