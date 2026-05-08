@@ -451,7 +451,7 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
   try {
     const resp = await fetch('/api/config');
     if (!resp.ok) return;
-    const { businessName, phone, theme } = await resp.json();
+    const { businessName, phone, theme, status } = await resp.json();
 
     if (status === 'paused' || status === 'canceled') {
       document.body.innerHTML = `
