@@ -130,6 +130,7 @@ export default async function handler(req, res) {
       mode:           'payment',
       line_items:     [{ price: priceId, quantity: 1 }],
       customer_email: lead.email,
+      payment_intent_data: { setup_future_usage: 'off_session' },
       metadata:       { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
       success_url:    `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:     `${appUrl}/onboard?token=${token}`,
