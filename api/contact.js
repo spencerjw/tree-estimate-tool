@@ -75,10 +75,16 @@ export default async function handler(req, res) {
   }
 
   if (process.env.RESEND_API_KEY) {
-    await Promise.all([
-      sendLeadAcknowledgmentEmail(lead),
-      sendLeadNotificationToAdmin(lead),
-    ]);
+    try {
+      await sendLeadAcknowledgmentEmail(lead);
+    } catch (err) {
+      console.error('Lead acknowledgment email failed:', err?.message ?? err);
+    }
+    try {
+      await sendLeadNotificationToAdmin(lead);
+    } catch (err) {
+      console.error('Admin notification email failed:', err?.message ?? err);
+    }
   }
 
   return res.status(200).json({ success: true });
