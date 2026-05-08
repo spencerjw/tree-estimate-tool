@@ -453,6 +453,18 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
     if (!resp.ok) return;
     const { businessName, phone, theme } = await resp.json();
 
+    if (status === 'paused' || status === 'canceled') {
+      document.body.innerHTML = `
+        <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0d0f;font-family:sans-serif;padding:24px;">
+          <div style="max-width:480px;width:100%;background:#14191e;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:48px 40px;text-align:center;color:#e8edf2;">
+            <div style="font-size:48px;margin-bottom:20px;">🌳</div>
+            <h1 style="font-size:22px;font-weight:700;margin-bottom:12px;">Service Unavailable</h1>
+            <p style="color:#b6bfc8;font-size:15px;line-height:1.6;">This estimate tool is temporarily unavailable. Please contact the business directly for a quote.</p>
+          </div>
+        </div>`;
+      return;
+    }
+
     if (theme && theme !== 'forest-green') {
       const THEMES = {
         'deep-navy':      { main: '#3b82f6', hover: '#1d4ed8', soft: 'rgba(59,130,246,0.12)',  glow: 'rgba(59,130,246,0.25)'  },
