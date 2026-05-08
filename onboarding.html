@@ -744,8 +744,12 @@ document.getElementById('onboard-form').addEventListener('submit', async functio
       return;
     }
 
-    // Redirect to Stripe checkout
-    window.location.href = data.checkoutUrl;
+    // Redirect to Stripe checkout or directly to welcome if fee was waived
+    if (data.success && data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+    } else if (data.success && data.waived) {
+      window.location.href = '/welcome';
+    }
 
   } catch (err) {
     showFormError('Network error. Please check your connection and try again.');

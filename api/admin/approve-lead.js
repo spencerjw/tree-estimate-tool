@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
   if (!checkPassword(req))     return res.status(401).json({ error: 'Unauthorized' });
 
-  const { leadId } = req.body ?? {};
+  const { leadId, waiveSetupFee } = req.body ?? {};
   if (!leadId) return res.status(400).json({ error: 'Missing leadId' });
 
   const { data: lead, error: leadErr } = await supabase
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
 
   const { error: updateErr } = await supabase
     .from('leads')
-    .update({ status: 'approved', onboarding_token: token })
+    .update({ status: 'approved', onboarding_token: token, waive_setup_fee: waiveSetupFee === true })
     .eq('id', leadId);
 
   if (updateErr) {

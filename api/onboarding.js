@@ -115,7 +115,14 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: updateErr.message });
     }
 
-    // Create Stripe checkout for setup fee
+    // If setup fee is waived, provision directly — skip Stripe checkout
+    if (lead.waive_setup_fee) {
+      const { provisionCustomer } = await import('../lib/provision.js');
+      await provisionCustomer(lead);
+      return res.status(200).json({ success: true, waived: true });
+    }
+
+    // Otherwise create Stripe checkout as normal
     const priceId = SETUP_PRICE_IDS[lead.tier];
     if (!priceId) {
       return res.status(500).json({
@@ -127,13 +134,13 @@ export default async function handler(req, res) {
     const appUrl  = process.env.APP_URL ?? 'https://app.treesnap.cloud';
 
     const session = await stripe.checkout.sessions.create({
-      mode:           'payment',
-      line_items:     [{ price: priceId, quantity: 1 }],
-      customer_email: lead.email,
+      mode:                'payment',
+      line_items:          [{ price: priceId, quantity: 1 }],
+      customer_email:      lead.email,
       payment_intent_data: { setup_future_usage: 'off_session' },
-      metadata:       { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
-      success_url:    `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:     `${appUrl}/onboard?token=${token}`,
+      metadata:            { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
+      success_url:         `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:          `${appUrl}/onboard?token=${token}`,
     });
 
     return res.status(200).json({ success: true, checkoutUrl: session.url });
