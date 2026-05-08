@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configure Your TreeSnap Account</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0a0d0f;
+      --surface: #14191e;
+      --border:  #1e2730;
+      --text:    #e2e8f0;
+      --muted:   #64748b;
+      --green:   #22c55e;
+      --green-d: #16a34a;
+      --red:     #ef4444;
+    }
+
+    body {
+      font-family: 'Geist', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ---- Header ---- */
+    .site-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+    }
+    .site-header .logo { font-size: 16px; font-weight: 700; color: var(--green); }
+
+    /* ---- State screens ---- */
+    .state-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - 56px);
+      gap: 16px;
+      padding: 24px;
+      text-align: center;
+    }
+    .state-screen p { color: var(--muted); max-width: 400px; line-height: 1.6; }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Main layout ---- */
+    #form-screen { display: none; }
+    .page-wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    .page-heading { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .page-sub { color: var(--muted); line-height: 1.6; margin-bottom: 36px; }
+
+    /* ---- Section card ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+    .section-note {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    /* ---- Form fields ---- */
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .field-row.single { grid-template-columns: 1fr; }
+    @media (max-width: 540px) { .field-row { grid-template-columns: 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .field-note { font-size: 12px; color: var(--muted); }
+
+    .input-wrap { position: relative; display: flex; align-items: center; }
+    .input-prefix {
+      position: absolute; left: 10px;
+      color: var(--muted); font-size: 14px; pointer-events: none;
+    }
+
+    input[type="text"],
+    input[type="tel"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    input[type="number"].has-prefix { padding-left: 24px; }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--green);
+    }
+    input.error, select.error, textarea.error { border-color: var(--red); }
+    select { cursor: pointer; }
+    textarea { resize: vertical; min-height: 80px; }
+
+    /* ---- Zip tag input ---- */
+    .zip-input-wrap {
+      min-height: 42px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      cursor: text;
+      transition: border-color 0.15s;
+    }
+    .zip-input-wrap:focus-within { border-color: var(--green); }
+    .zip-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(34,197,94,0.12);
+      color: var(--green);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .zip-tag button {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); padding: 0; line-height: 1;
+      font-size: 14px;
+    }
+    .zip-tag button:hover { color: var(--red); }
+    .zip-text-input {
+      border: none !important;
+      background: transparent !important;
+      padding: 2px 4px !important;
+      flex: 1;
+      min-width: 80px;
+      outline: none !important;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    /* ---- Add-on grid ---- */
+    .addon-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+    }
+    .addon-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .addon-card.checked {
+      border-color: var(--green);
+      background: rgba(34,197,94,0.05);
+    }
+    .addon-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .addon-check {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .addon-card.checked .addon-check {
+      background: var(--green);
+      border-color: var(--green);
+    }
+    .addon-check svg { display: none; }
+    .addon-card.checked .addon-check svg { display: block; }
+    .addon-label { font-size: 13px; font-weight: 500; }
+    .addon-prices {
+      display: none;
+      margin-top: 10px;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .addon-card.checked .addon-prices { display: grid; }
+    .addon-price-field { display: flex; flex-direction: column; gap: 4px; }
+    .addon-price-field label { font-size: 11px; color: var(--muted); }
+    .addon-price-input {
+      padding: 5px 8px 5px 20px !important;
+      font-size: 13px !important;
+    }
+
+    /* ---- Theme swatches ---- */
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 480px) { .theme-grid { grid-template-columns: repeat(2, 1fr); } }
+    .theme-card {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: border-color 0.15s;
+      user-select: none;
+    }
+    .theme-card.selected { border-color: var(--green); }
+    .theme-dot {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .theme-name { font-size: 13px; font-weight: 500; }
+
+    /* ---- Submit ---- */
+    .submit-row { margin-top: 28px; }
+    .btn-submit {
+      width: 100%;
+      padding: 14px;
+      background: var(--green-d);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-submit:hover { opacity: 0.9; }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .form-error {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 6px;
+      color: var(--red);
+      font-size: 13px;
+      display: none;
+    }
+
+    .spinner-inline {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid transparent;
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <span class="logo">TreeSnap</span>
+</header>
+
+<!-- Loading -->
+<div class="state-screen" id="loading-screen">
+  <div class="spinner"></div>
+  <p>Loading your account details…</p>
+</div>
+
+<!-- Error / Expired -->
+<div class="state-screen" id="error-screen" style="display:none">
+  <div style="font-size:40px;">⚠️</div>
+  <h2 id="error-heading" style="font-size:20px;font-weight:700;"></h2>
+  <p id="error-body"></p>
+</div>
+
+<!-- Form -->
+<div id="form-screen">
+  <div class="page-wrap">
+    <h1 class="page-heading">Welcome to TreeSnap</h1>
+    <p class="page-sub">Tell us about your business so your estimate tool is tuned to your real pricing from day one. This takes about 2 minutes.</p>
+
+    <form id="onboard-form" novalidate>
+
+      <!-- Section 1: Business Info -->
+      <div class="section">
+        <div class="section-title">Business Info</div>
+        <div class="field-row">
+          <div class="field">
+            <label for="business_name">Business Display Name</label>
+            <input type="text" id="business_name" name="business_name" placeholder="Acme Tree Service" required />
+          </div>
+          <div class="field">
+            <label for="phone">Business Phone</label>
+            <input type="tel" id="phone" name="phone" placeholder="(512) 555-0192" required />
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Service Area -->
+      <div class="section">
+        <div class="section-title">Service Area</div>
+        <div class="field field-row single">
+          <label>Service Area Zip Codes</label>
+          <div class="zip-input-wrap" id="zip-wrap" onclick="document.getElementById('zip-text').focus()">
+            <input type="text" id="zip-text" class="zip-text-input" placeholder="Type a zip and press Enter…" autocomplete="off" />
+          </div>
+          <span class="field-note">Leave blank to serve all areas.</span>
+        </div>
+      </div>
+
+      <!-- Section 3: Pricing -->
+      <div class="section">
+        <div class="section-title">Your Pricing</div>
+        <div class="section-note">We use these as the floor/ceiling for AI-generated estimates. Set them to your real rates — they can be adjusted later.</div>
+        <div class="field-row">
+          <div class="field">
+            <label for="removal_low">Tree Removal — Low end</label>
+            <div class="input-wrap">
+              <span class="input-prefix">$</span>
+              <input type="number" id="removal_low" name="removal_low" class="has-prefix" placeholder="800" min="0" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="removal_high">Tree Removal — High end</label>
+            <div class="input-wrap">
+              <span class="input-prefix">$</span>
+              <input type="number" id="removal_high" name="removal_high" class="has-prefix" placeholder="2500" min="0" required />
+            </div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="trimming_low">Trimming/Pruning — Low end</label>
+            <div class="input-wrap">
+              <span class="input-prefix">$</span>
+              <input type="number" id="trimming_low" name="trimming_low" class="has-prefix" placeholder="300" min="0" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="trimming_high">Trimming/Pruning — High end</label>
+            <div class="input-wrap">
+              <span class="input-prefix">$</span>
+              <input type="number" id="trimming_high" name="trimming_high" class="has-prefix" placeholder="900" min="0" required />
+            </div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="minimum_job">Minimum Job Size</label>
+            <div class="input-wrap">
+              <span class="input-prefix">$</span>
+              <input type="number" id="minimum_job" name="minimum_job" class="has-prefix" placeholder="350" min="0" />
+            </div>
+            <span class="field-note">Estimates below this will be bumped up.</span>
+          </div>
+          <div class="field">
+            <label for="emergency_multiplier">Emergency / Same-Day Upcharge</label>
+            <select id="emergency_multiplier" name="emergency_multiplier">
+              <option value="1.25">1.25× standard rate</option>
+              <option value="1.5" selected>1.5× standard rate</option>
+              <option value="1.75">1.75× standard rate</option>
+              <option value="2.0">2.0× standard rate</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Add-Ons -->
+      <div class="section">
+        <div class="section-title">Add-On Services</div>
+        <div class="section-note">Which add-ons do you offer? Check all that apply and set your price range.</div>
+        <div class="addon-grid" id="addon-grid">
+          <!-- rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Section 5: Theme -->
+      <div class="section">
+        <div class="section-title">Brand Theme</div>
+        <div class="section-note">Pick a color theme for your estimate tool. You can change it later.</div>
+        <div class="theme-grid" id="theme-grid">
+          <!-- rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Section 6: Disclaimer -->
+      <div class="section">
+        <div class="section-title">Custom Disclaimer <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12px;">(optional)</span></div>
+        <div class="section-note">Shown at the bottom of every estimate. Leave blank to use our default.</div>
+        <div class="field">
+          <textarea id="custom_disclaimer" name="custom_disclaimer" maxlength="500"
+            placeholder="Estimates are subject to on-site inspection and may vary based on access, equipment requirements, and local conditions."></textarea>
+          <span class="field-note" id="disclaimer-count">0 / 500</span>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="submit-row">
+        <button type="submit" class="btn-submit" id="submit-btn">
+          Save My Settings &amp; Complete Setup →
+        </button>
+        <div class="form-error" id="form-error"></div>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================
+   TreeSnap Onboarding — vanilla JS, no frameworks
+   ========================================================================== */
+
+const params = new URLSearchParams(location.search);
+const TOKEN  = params.get('token');
+
+// ---- Add-on definitions ----
+const ADDONS = [
+  { name: 'Stump Grinding',             low: 150, high: 400  },
+  { name: 'Haul-Away / Debris Removal', low: 100, high: 300  },
+  { name: 'Log Splitting & Stacking',   low: 75,  high: 200  },
+  { name: 'Emergency Response',         low: 200, high: 500  },
+  { name: 'Lot Clearing',               low: 500, high: 2000 },
+  { name: 'Root Barrier Installation',  low: 300, high: 800  },
+];
+
+// ---- Theme definitions ----
+const THEMES = [
+  { key: 'forest-green', name: 'Forest Green',   color: '#16a34a' },
+  { key: 'deep-navy',    name: 'Deep Navy',       color: '#1d4ed8' },
+  { key: 'slate-gray',   name: 'Slate Gray',      color: '#475569' },
+  { key: 'burnt-orange', name: 'Burnt Orange',    color: '#ea580c' },
+  { key: 'burgundy-red', name: 'Burgundy Red',    color: '#9f1239' },
+  { key: 'charcoal',     name: 'Charcoal Black',  color: '#1c1c1c' },
+];
+
+// ---- State ----
+let zipCodes    = [];
+let checkedAddons = {};  // name → { low, high }
+let selectedTheme = 'forest-green';
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+(async function init() {
+  if (!TOKEN) {
+    showError('Invalid Link', 'No onboarding token was found in this URL. Please use the link from your approval email.');
+    return;
+  }
+
+  let data;
+  try {
+    const resp = await fetch(`/api/onboarding?token=${encodeURIComponent(TOKEN)}`);
+    if (resp.status === 404) {
+      showError('Link Not Found', 'This onboarding link is invalid. Please use the link from your approval email, or contact hello@treesnap.cloud.');
+      return;
+    }
+    if (resp.status === 410) {
+      showError('Link Expired', 'This onboarding link has expired (links are valid for 72 hours). Contact hello@treesnap.cloud to get a new one.');
+      return;
+    }
+    if (!resp.ok) throw new Error('API error');
+    data = await resp.json();
+  } catch (err) {
+    showError('Something went wrong', 'We couldn\'t load your account details. Please try again or contact hello@treesnap.cloud.');
+    return;
+  }
+
+  prefillForm(data);
+  renderAddons();
+  renderThemes();
+  setupZipInput();
+  setupDisclaimerCount();
+
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('form-screen').style.display    = 'block';
+})();
+
+// ---------------------------------------------------------------------------
+// Prefill
+// ---------------------------------------------------------------------------
+function prefillForm(data) {
+  if (data.company_name) document.getElementById('business_name').value = data.company_name;
+  if (data.phone)        document.getElementById('phone').value         = data.phone;
+}
+
+// ---------------------------------------------------------------------------
+// Zip tag input
+// ---------------------------------------------------------------------------
+function setupZipInput() {
+  const input = document.getElementById('zip-text');
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addZip(input.value.trim().replace(/,$/, ''));
+      input.value = '';
+    } else if (e.key === 'Backspace' && input.value === '' && zipCodes.length > 0) {
+      removeZip(zipCodes.length - 1);
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    const val = input.value.trim().replace(/,$/, '');
+    if (val) { addZip(val); input.value = ''; }
+  });
+}
+
+function addZip(zip) {
+  if (!zip) return;
+  // Accept 5-digit zips or reasonable variants
+  if (!/^\d{4,10}$/.test(zip.replace(/\s/g, ''))) return;
+  zip = zip.replace(/\s/g, '');
+  if (zipCodes.includes(zip)) return;
+  zipCodes.push(zip);
+  renderZips();
+}
+
+function removeZip(i) {
+  zipCodes.splice(i, 1);
+  renderZips();
+}
+
+function renderZips() {
+  const wrap  = document.getElementById('zip-wrap');
+  const input = document.getElementById('zip-text');
+  // Remove existing tags (keep input)
+  wrap.querySelectorAll('.zip-tag').forEach(el => el.remove());
+  zipCodes.forEach((zip, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'zip-tag';
+    tag.innerHTML = `${zip}<button type="button" aria-label="Remove ${zip}" onclick="removeZip(${i})">×</button>`;
+    wrap.insertBefore(tag, input);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Add-ons
+// ---------------------------------------------------------------------------
+function renderAddons() {
+  const grid = document.getElementById('addon-grid');
+  grid.innerHTML = ADDONS.map(addon => {
+    const id = addonId(addon.name);
+    return `
+<div class="addon-card" id="card-${id}" onclick="toggleAddon('${id}','${escAttr(addon.name)}')">
+  <div class="addon-card-header">
+    <div class="addon-check">
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <span class="addon-label">${escHtml(addon.name)}</span>
+  </div>
+  <div class="addon-prices">
+    <div class="addon-price-field">
+      <label>Low</label>
+      <div class="input-wrap">
+        <span class="input-prefix">$</span>
+        <input type="number" id="${id}-low" class="has-prefix addon-price-input"
+               value="${addon.low}" min="0"
+               onclick="event.stopPropagation()"
+               oninput="updateAddonPrice('${id}','${escAttr(addon.name)}')" />
+      </div>
+    </div>
+    <div class="addon-price-field">
+      <label>High</label>
+      <div class="input-wrap">
+        <span class="input-prefix">$</span>
+        <input type="number" id="${id}-high" class="has-prefix addon-price-input"
+               value="${addon.high}" min="0"
+               onclick="event.stopPropagation()"
+               oninput="updateAddonPrice('${id}','${escAttr(addon.name)}')" />
+      </div>
+    </div>
+  </div>
+</div>`;
+  }).join('');
+}
+
+function addonId(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+function toggleAddon(id, name) {
+  const card = document.getElementById(`card-${id}`);
+  const isChecked = card.classList.toggle('checked');
+  if (isChecked) {
+    const low  = Number(document.getElementById(`${id}-low`).value)  || 0;
+    const high = Number(document.getElementById(`${id}-high`).value) || 0;
+    checkedAddons[name] = { low, high };
+  } else {
+    delete checkedAddons[name];
+  }
+}
+
+function updateAddonPrice(id, name) {
+  if (!checkedAddons[name]) return;
+  checkedAddons[name] = {
+    low:  Number(document.getElementById(`${id}-low`).value)  || 0,
+    high: Number(document.getElementById(`${id}-high`).value) || 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Themes
+// ---------------------------------------------------------------------------
+function renderThemes() {
+  const grid = document.getElementById('theme-grid');
+  grid.innerHTML = THEMES.map(t => `
+<div class="theme-card ${t.key === selectedTheme ? 'selected' : ''}"
+     onclick="selectTheme('${t.key}', this)">
+  <div class="theme-dot" style="background:${t.color}"></div>
+  <span class="theme-name">${t.name}</span>
+</div>`).join('');
+}
+
+function selectTheme(key, el) {
+  selectedTheme = key;
+  document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// ---------------------------------------------------------------------------
+// Disclaimer counter
+// ---------------------------------------------------------------------------
+function setupDisclaimerCount() {
+  const ta = document.getElementById('custom_disclaimer');
+  const counter = document.getElementById('disclaimer-count');
+  ta.addEventListener('input', () => {
+    counter.textContent = `${ta.value.length} / 500`;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Form submission
+// ---------------------------------------------------------------------------
+document.getElementById('onboard-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  clearErrors();
+
+  const businessName = document.getElementById('business_name').value.trim();
+  const phone        = document.getElementById('phone').value.trim();
+  const removalLow   = Number(document.getElementById('removal_low').value);
+  const removalHigh  = Number(document.getElementById('removal_high').value);
+  const trimmingLow  = Number(document.getElementById('trimming_low').value);
+  const trimmingHigh = Number(document.getElementById('trimming_high').value);
+  const minJob       = Number(document.getElementById('minimum_job').value) || 350;
+  const emergencyMult= Number(document.getElementById('emergency_multiplier').value);
+  const disclaimer   = document.getElementById('custom_disclaimer').value.trim();
+
+  // Validation
+  const errors = [];
+  if (!businessName) { markError('business_name'); errors.push('Business name is required.'); }
+  if (!phone)        { markError('phone');          errors.push('Phone number is required.'); }
+  if (!removalLow)   { markError('removal_low');    errors.push('Tree removal low end is required.'); }
+  if (!removalHigh)  { markError('removal_high');   errors.push('Tree removal high end is required.'); }
+  if (removalLow >= removalHigh) { markError('removal_high'); errors.push('Removal high must be greater than low.'); }
+  if (!trimmingLow)  { markError('trimming_low');   errors.push('Trimming low end is required.'); }
+  if (!trimmingHigh) { markError('trimming_high');  errors.push('Trimming high end is required.'); }
+  if (trimmingLow >= trimmingHigh) { markError('trimming_high'); errors.push('Trimming high must be greater than low.'); }
+
+  if (errors.length) {
+    showFormError(errors[0]);
+    return;
+  }
+
+  const addOnsArray = Object.entries(checkedAddons).map(([name, { low, high }]) => ({ name, low, high }));
+
+  const body = {
+    token:                TOKEN,
+    business_name:        businessName,
+    phone,
+    service_zips:         zipCodes,
+    removal_low:          removalLow,
+    removal_high:         removalHigh,
+    trimming_low:         trimmingLow,
+    trimming_high:        trimmingHigh,
+    minimum_job:          minJob,
+    emergency_multiplier: emergencyMult,
+    add_ons:              addOnsArray,
+    theme:                selectedTheme,
+    custom_disclaimer:    disclaimer || null,
+  };
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span> Saving…';
+
+  try {
+    const resp = await fetch('/api/onboarding', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      showFormError(data.error || 'Something went wrong. Please try again.');
+      btn.disabled = false;
+      btn.textContent = 'Save My Settings & Complete Setup →';
+      return;
+    }
+
+    // Redirect to Stripe checkout
+    window.location.href = data.checkoutUrl;
+
+  } catch (err) {
+    showFormError('Network error. Please check your connection and try again.');
+    btn.disabled = false;
+    btn.textContent = 'Save My Settings & Complete Setup →';
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function showError(heading, body) {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('error-screen').style.display   = 'flex';
+  document.getElementById('error-heading').textContent    = heading;
+  document.getElementById('error-body').textContent       = body;
+}
+
+function markError(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (el) el.classList.add('error');
+}
+
+function clearErrors() {
+  document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+  const errEl = document.getElementById('form-error');
+  errEl.style.display = 'none';
+  errEl.textContent   = '';
+}
+
+function showFormError(msg) {
+  const errEl = document.getElementById('form-error');
+  errEl.textContent   = msg;
+  errEl.style.display = 'block';
+  errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escAttr(str) {
+  return String(str).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

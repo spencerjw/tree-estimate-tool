@@ -22,6 +22,10 @@
     {
       "src": "^/admin$",
       "dest": "/admin.html"
+    },
+    {
+      "src": "^/onboard$",
+      "dest": "/onboarding.html"
     }
   ]
 }
