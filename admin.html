@@ -385,6 +385,21 @@
   </div>
 </div>
 
+<!-- Delete customer modal -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal">
+    <h3 style="color:var(--red)">Delete Customer</h3>
+    <p style="color:var(--muted);font-size:13px;">Permanently deletes <strong id="delete-subdomain-label" style="color:var(--text)"></strong> and tears down its Stripe subscription, DNS record, Vercel domain, and all data (config, estimates, usage, email log). <strong style="color:var(--red)">This cannot be undone.</strong></p>
+    <p style="color:var(--muted);font-size:13px;">Type the subdomain to confirm:</p>
+    <input type="text" id="delete-confirm-input" autocomplete="off" oninput="onDeleteInput()" placeholder=""
+           style="padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;font-family:inherit;width:100%;" />
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeDeleteModal()">Cancel</button>
+      <button class="btn btn-danger"  id="delete-confirm-btn" onclick="confirmDelete()" disabled>Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* =====================================================================
    TreeSnap Admin — vanilla JS, no frameworks
@@ -394,6 +409,8 @@ let adminPassword = sessionStorage.getItem('adminPassword') || '';
 let customersData  = [];
 let leadsData      = [];
 let rejectLeadId   = null;
+let deleteCustomerId = null;
+let deleteSubdomain  = null;
 
 // Auto-login if password is in sessionStorage
 if (adminPassword) {
@@ -621,6 +638,7 @@ function renderTable() {
       ${canExtend ? `<button class="btn btn-outline" onclick="openExtendModal('${escape(c.id)}',${i},'${escape(c.trial_end)}')">Extend Trial</button>` : ''}
       ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
       ${upgradeBtns}
+      <button class="btn btn-danger" onclick="openDeleteModal('${escape(c.id)}','${escape(c.subdomain)}')">Delete</button>
       <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
       <span class="action-error"    id="error-${i}"    style="display:none"></span>
     </div>
@@ -823,6 +841,53 @@ async function confirmReject() {
     if (idx !== -1) { leadsData[idx].status = 'rejected'; renderLeads(); }
   } catch (err) {
     alert('Reject failed: ' + err.message);
+  }
+}
+
+// -----------------------------------------------------------------------
+// Delete customer (type-to-confirm; full teardown server-side)
+// -----------------------------------------------------------------------
+function openDeleteModal(customerId, subdomain) {
+  deleteCustomerId = customerId;
+  deleteSubdomain  = subdomain;
+  document.getElementById('delete-subdomain-label').textContent = subdomain + '.treesnap.cloud';
+  const input = document.getElementById('delete-confirm-input');
+  input.value = '';
+  input.placeholder = subdomain;
+  document.getElementById('delete-confirm-btn').disabled = true;
+  document.getElementById('delete-modal').classList.add('open');
+}
+
+function closeDeleteModal() {
+  deleteCustomerId = null;
+  deleteSubdomain  = null;
+  document.getElementById('delete-modal').classList.remove('open');
+}
+
+function onDeleteInput() {
+  const val = document.getElementById('delete-confirm-input').value.trim();
+  document.getElementById('delete-confirm-btn').disabled = (val !== deleteSubdomain);
+}
+
+async function confirmDelete() {
+  if (!deleteCustomerId) return;
+  const btn = document.getElementById('delete-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const out = await apiPost({ customerId: deleteCustomerId }, '/api/admin/delete-customer');
+    closeDeleteModal();
+    const data = await apiGet();   // refresh from the DB so the row disappears
+    showAdmin(data);
+    if (out && out.warnings && out.warnings.length) {
+      alert('Customer deleted, but some external cleanup did not complete:\n\n'
+            + out.warnings.join('\n')
+            + '\n\nYou may need to remove these manually (Stripe / Cloudflare / Vercel).');
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Delete Permanently';
+    alert('Delete failed: ' + err.message);
   }
 }
 
