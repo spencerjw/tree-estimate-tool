@@ -9,6 +9,7 @@ import {
   sendSubscriptionStartedEmail,
   sendPaymentFailedEmail,
   sendCancellationEmail,
+  sendAccountChangeSummary,
 } from '../lib/emails.js';
 
 export const config = {
@@ -21,6 +22,8 @@ const MONTHLY_PRICE_IDS = {
   pro:     'price_1TUracGTb7xBM80FNCyGv4Hp',  // $129/mo
   proplus: 'price_1TUrafGTb7xBM80FVV4J21Cr',  // $179/mo
 };
+
+const TIER_LABELS = { starter: 'Starter', pro: 'Pro', proplus: 'Pro+' };
 
 // Stripe price ID → TreeSnap tier
 const PRICE_TO_TIER = {
@@ -244,6 +247,19 @@ export default async function handler(req, res) {
             .eq('id', customer_id);
 
           console.log(`Upgraded customer ${customer_id} → ${target_tier}`);
+
+          // Notify the customer their plan changed (tier flips here, on payment,
+          // not when the admin sent the checkout link). Best-effort.
+          try {
+            await sendAccountChangeSummary(customer.email, customer, [{
+              label: 'Plan',
+              from:  TIER_LABELS[customer.tier] ?? customer.tier,
+              to:    TIER_LABELS[target_tier] ?? target_tier,
+            }]);
+            await logEmail(customer.id, 'account_updated', customer.email);
+          } catch (e) {
+            console.error('Upgrade summary email failed:', e.message);
+          }
 
         } else if (lead_id) {
           // New signup flow — provision the customer
