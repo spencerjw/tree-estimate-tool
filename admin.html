@@ -833,6 +833,7 @@ async function confirmExtend() {
       const trialCell = rows[rowIndex].querySelector('td:nth-child(5)');
       if (trialCell) trialCell.textContent = fmtDate(result.new_trial_end);
     }
+    if (result.warnings && result.warnings.length) alert('Done — but with warnings:\n• ' + result.warnings.join('\n• '));
   } catch (err) {
     showError(rowIndex, err.message);
   }
@@ -846,6 +847,7 @@ async function togglePause(customerId, i) {
     const result = await apiPost({ action: 'toggle-pause', customerId });
     showFeedback(i, `Status changed to ${result.new_status}`);
     customersData[i].status = result.new_status;
+    if (result.warnings && result.warnings.length) alert('Done — but with warnings:\n• ' + result.warnings.join('\n• '));
     // Re-render after a brief delay to show the feedback
     setTimeout(() => { renderTable(); }, 1200);
   } catch (err) {
