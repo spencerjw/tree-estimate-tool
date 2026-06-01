@@ -737,6 +737,9 @@ function renderLeads() {
     const actionsHtml = isPending
       ? `<button class="btn btn-primary" onclick="approveLead('${escape(l.id)}',${i})">Approve</button>
          <button class="btn btn-danger"  onclick="openRejectModal('${escape(l.id)}')">Reject</button>`
+      : isApproved
+      ? `<button class="btn btn-outline" onclick="resendOnboarding('${escape(l.id)}',${i})">Resend link</button>
+         <span style="color:var(--muted);font-size:12px;">approved</span>`
       : `<span style="color:var(--muted);font-size:12px;">${escape(l.status)}</span>`;
 
     return `
@@ -772,6 +775,23 @@ async function approveLead(leadId, i) {
     const fb = document.getElementById(`lead-feedback-${i}`);
     if (fb) { fb.textContent = 'Approved — checkout link sent'; fb.style.display = 'inline'; }
     leadsData[i].status = 'approved';
+    setTimeout(() => renderLeads(), 1500);
+  } catch (err) {
+    const eb = document.getElementById(`lead-error-${i}`);
+    if (eb) { eb.textContent = err.message; eb.style.display = 'inline'; }
+    btns?.forEach(b => b.disabled = false);
+  }
+}
+
+async function resendOnboarding(leadId, i) {
+  const container = document.getElementById(`lead-actions-${i}`);
+  const btns = container?.querySelectorAll('.btn');
+  btns?.forEach(b => b.disabled = true);
+
+  try {
+    await apiPost({ leadId }, '/api/admin/resend-onboarding');
+    const fb = document.getElementById(`lead-feedback-${i}`);
+    if (fb) { fb.textContent = 'New setup link sent'; fb.style.display = 'inline'; }
     setTimeout(() => renderLeads(), 1500);
   } catch (err) {
     const eb = document.getElementById(`lead-error-${i}`);

@@ -100,13 +100,15 @@ export default async function handler(req, res) {
       custom_disclaimer:     custom_disclaimer || null,
     };
 
-    // Save config and mark onboarding complete
+    // Save config. NOTE: onboarding_completed_at is intentionally NOT set here —
+    // it is marked only after payment succeeds (in lib/provision.js). Setting it
+    // before payment would lock out a customer who abandons at Stripe checkout,
+    // because the token is only valid while onboarding_completed_at IS NULL.
     const { error: updateErr } = await supabase
       .from('leads')
       .update({
-        onboarding_config:       onboardingConfig,
-        onboarding_completed_at: new Date().toISOString(),
-        company:                 business_name,
+        onboarding_config: onboardingConfig,
+        company:           business_name,
         phone,
       })
       .eq('id', lead.id);
