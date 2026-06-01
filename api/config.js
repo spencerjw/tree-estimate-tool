@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   const host = req.headers.host ?? '';
 
   if (isDemoHost(host)) {
-    return res.status(200).json({ businessName: 'TreePro Demo', phone: '' });
+    return res.status(200).json({ businessName: 'TreePro Demo', phone: '', subdomain: 'demo' });
   }
 
   const subdomain = host.split('.')[0].toLowerCase();
@@ -44,5 +44,6 @@ export default async function handler(req, res) {
     phone:        customer.phone || '',
     status:       customer.status,
     theme:        customer.customer_config?.theme || 'forest-green',
+    subdomain,
   });
 }

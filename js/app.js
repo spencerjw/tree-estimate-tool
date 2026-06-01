@@ -28,6 +28,7 @@ const CONFIG = {
 // State
 // ---------------------------------------------------------------------------
 let selectedFiles = []; // Array of { file: File, dataUrl: string }
+let TENANT = '';        // Tenant subdomain, set once /api/config loads; stamped onto GA4 events
 
 // ---------------------------------------------------------------------------
 // DOM refs — grab once
@@ -413,6 +414,11 @@ form.addEventListener('submit', async (e) => {
     renderResults(json.estimate, serviceType);
     showSection(resultsSection);
 
+    // Homeowner lead for this tenant — distinct from the marketing-site `generate_lead`.
+    if (typeof gtag === 'function') {
+      gtag('event', 'estimate_completed', { event_category: 'estimate', tenant: TENANT });
+    }
+
   } catch (err) {
     stopLoading();
     errorMsg.textContent = err.message || 'Please try again.';
@@ -451,7 +457,13 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
   try {
     const resp = await fetch('/api/config');
     if (!resp.ok) return;
-    const { businessName, phone, theme } = await resp.json();
+    const { businessName, phone, theme, subdomain } = await resp.json();
+
+    // Tag every subsequent GA4 hit with the tenant (hostname is also auto-captured).
+    TENANT = subdomain || '';
+    if (typeof gtag === 'function' && TENANT) {
+      gtag('set', { tenant: TENANT });
+    }
 
     if (theme && theme !== 'forest-green') {
       const THEMES = {
