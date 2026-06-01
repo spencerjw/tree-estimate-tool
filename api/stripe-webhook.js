@@ -17,16 +17,16 @@ export const config = {
 
 // Stripe monthly price ID → TreeSnap tier (also used for upgrade swaps)
 const MONTHLY_PRICE_IDS = {
-  starter: 'price_1TUSnhK2K8Vtuj3t4JNdUWpH',
-  pro:     'price_1TUSniK2K8Vtuj3tuy9DaHtP',
-  proplus: 'price_1TUSniK2K8Vtuj3tfZTjKOPH',
+  starter: 'price_1TUradGTb7xBM80FK2OjcI5D',  // $79/mo
+  pro:     'price_1TUracGTb7xBM80FNCyGv4Hp',  // $129/mo
+  proplus: 'price_1TUrafGTb7xBM80FVV4J21Cr',  // $179/mo
 };
 
 // Stripe price ID → TreeSnap tier
 const PRICE_TO_TIER = {
-  'price_1TUSnhK2K8Vtuj3t4JNdUWpH': 'starter',  // $79/mo
-  'price_1TUSniK2K8Vtuj3tuy9DaHtP': 'pro',       // $129/mo
-  'price_1TUSniK2K8Vtuj3tfZTjKOPH': 'proplus',   // $179/mo
+  'price_1TUradGTb7xBM80FK2OjcI5D': 'starter',  // $79/mo
+  'price_1TUracGTb7xBM80FNCyGv4Hp': 'pro',       // $129/mo
+  'price_1TUrafGTb7xBM80FVV4J21Cr': 'proplus',   // $179/mo
 };
 
 // Stripe subscription status → TreeSnap status
