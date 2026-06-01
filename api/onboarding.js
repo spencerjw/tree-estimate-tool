@@ -24,7 +24,11 @@ async function getLeadByToken(token) {
 }
 
 function isExpired(lead) {
-  return Date.now() - new Date(lead.created_at).getTime() > TOKEN_TTL_MS;
+  // Key off when the token was issued, not when the lead was created — approval
+  // can lag application by days. Fall back to created_at for legacy rows whose
+  // token predates the onboarding_token_issued_at column.
+  const issuedAt = lead.onboarding_token_issued_at ?? lead.created_at;
+  return Date.now() - new Date(issuedAt).getTime() > TOKEN_TTL_MS;
 }
 
 export default async function handler(req, res) {
