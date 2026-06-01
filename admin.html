@@ -278,6 +278,25 @@
     }
     .modal textarea:focus { outline: none; border-color: var(--red); }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ---- Edit config modal ---- */
+    .modal-lg { width: 560px; max-width: calc(100vw - 32px); max-height: calc(100vh - 64px); overflow-y: auto; }
+    .cfg-form { display: flex; flex-direction: column; gap: 18px; }
+    .cfg-section-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .cfg-field { display: flex; flex-direction: column; gap: 5px; }
+    .cfg-field.full { grid-column: 1 / -1; }
+    .cfg-field label { font-size: 12px; font-weight: 500; color: var(--muted); }
+    .cfg-field input, .cfg-field select, .cfg-field textarea {
+      padding: 9px 12px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-size: 14px; font-family: inherit; width: 100%;
+    }
+    .cfg-field textarea { resize: vertical; min-height: 64px; }
+    .cfg-field input:focus, .cfg-field select:focus, .cfg-field textarea:focus { outline: none; border-color: var(--green); }
+    .addon-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .addon-row input { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; }
+    .addon-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 8px; }
+    .cfg-error { color: var(--red); font-size: 13px; display: none; }
   </style>
 </head>
 <body>
@@ -368,6 +387,65 @@
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeExtendModal()">Cancel</button>
       <button class="btn btn-primary" onclick="confirmExtend()">Extend Trial</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit config modal -->
+<div class="modal-overlay" id="config-modal">
+  <div class="modal modal-lg">
+    <h3>Edit Config — <span id="config-company" style="color:var(--green)"></span></h3>
+    <p style="color:var(--muted);font-size:13px;">Edit anything the customer set during onboarding. Changes apply to their live estimate tool immediately.</p>
+    <div class="cfg-form">
+      <div>
+        <div class="cfg-section-title">Business</div>
+        <div class="cfg-grid">
+          <div class="cfg-field"><label>Business Name</label><input type="text" id="cfg-business_name" /></div>
+          <div class="cfg-field"><label>Phone</label><input type="text" id="cfg-phone" /></div>
+        </div>
+      </div>
+      <div>
+        <div class="cfg-section-title">Pricing</div>
+        <div class="cfg-grid">
+          <div class="cfg-field"><label>Tree Removal — Low ($)</label><input type="number" id="cfg-removal_low" min="0" /></div>
+          <div class="cfg-field"><label>Tree Removal — High ($)</label><input type="number" id="cfg-removal_high" min="0" /></div>
+          <div class="cfg-field"><label>Trimming — Low ($)</label><input type="number" id="cfg-trimming_low" min="0" /></div>
+          <div class="cfg-field"><label>Trimming — High ($)</label><input type="number" id="cfg-trimming_high" min="0" /></div>
+          <div class="cfg-field"><label>Minimum Job ($)</label><input type="number" id="cfg-minimum_job" min="0" /></div>
+          <div class="cfg-field"><label>Emergency Multiplier (×)</label><input type="number" id="cfg-emergency_multiplier" min="0" step="0.1" /></div>
+        </div>
+      </div>
+      <div>
+        <div class="cfg-section-title">Service Area</div>
+        <div class="cfg-field full"><label>Service Zip Codes (comma-separated — blank = all areas)</label><input type="text" id="cfg-service_zips" placeholder="78006, 78015, 78163" /></div>
+      </div>
+      <div>
+        <div class="cfg-section-title">Add-ons</div>
+        <div id="cfg-addons"></div>
+        <button type="button" class="btn btn-outline" onclick="addAddonRow()" style="margin-top:4px;">+ Add add-on</button>
+      </div>
+      <div>
+        <div class="cfg-section-title">Appearance & Legal</div>
+        <div class="cfg-grid">
+          <div class="cfg-field">
+            <label>Theme</label>
+            <select id="cfg-theme">
+              <option value="forest-green">Forest Green</option>
+              <option value="deep-navy">Deep Navy</option>
+              <option value="slate-gray">Slate Gray</option>
+              <option value="burnt-orange">Burnt Orange</option>
+              <option value="burgundy-red">Burgundy Red</option>
+              <option value="charcoal">Charcoal Black</option>
+            </select>
+          </div>
+        </div>
+        <div class="cfg-field full" style="margin-top:12px;"><label>Custom Disclaimer (max 500 chars)</label><textarea id="cfg-custom_disclaimer" maxlength="500"></textarea></div>
+      </div>
+      <div class="cfg-error" id="config-error"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeConfigModal()">Cancel</button>
+      <button class="btn btn-primary" id="config-save-btn" onclick="confirmEditConfig()">Save Changes</button>
     </div>
   </div>
 </div>
@@ -638,6 +716,7 @@ function renderTable() {
       ${canExtend ? `<button class="btn btn-outline" onclick="openExtendModal('${escape(c.id)}',${i},'${escape(c.trial_end)}')">Extend Trial</button>` : ''}
       ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
       ${upgradeBtns}
+      <button class="btn btn-outline" onclick="openConfigModal(${i})">Edit Config</button>
       <button class="btn btn-danger" onclick="openDeleteModal('${escape(c.id)}','${escape(c.subdomain)}')">Delete</button>
       <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
       <span class="action-error"    id="error-${i}"    style="display:none"></span>
@@ -734,6 +813,131 @@ function showFeedback(i, msg) {
 function showError(i, msg) {
   const el = document.getElementById(`error-${i}`);
   if (el) { el.textContent = msg; el.style.display = 'inline'; }
+}
+
+// -----------------------------------------------------------------------
+// Edit config (admin edit of everything set during onboarding)
+// -----------------------------------------------------------------------
+let configCustomerId = null;
+
+function openConfigModal(i) {
+  const c = customersData[i];
+  if (!c) return;
+  configCustomerId = c.id;
+  const cfg = c.customer_config || {};
+
+  document.getElementById('config-company').textContent = c.company_name || c.subdomain;
+  document.getElementById('cfg-business_name').value      = c.business_name || c.company_name || '';
+  document.getElementById('cfg-phone').value              = c.phone || '';
+  document.getElementById('cfg-removal_low').value        = cfg.base_rate_removal_low   ?? '';
+  document.getElementById('cfg-removal_high').value       = cfg.base_rate_removal_high  ?? '';
+  document.getElementById('cfg-trimming_low').value       = cfg.base_rate_trimming_low  ?? '';
+  document.getElementById('cfg-trimming_high').value      = cfg.base_rate_trimming_high ?? '';
+  document.getElementById('cfg-minimum_job').value        = cfg.minimum_job             ?? '';
+  document.getElementById('cfg-emergency_multiplier').value = cfg.emergency_multiplier  ?? '';
+  document.getElementById('cfg-service_zips').value       = Array.isArray(cfg.service_zips) ? cfg.service_zips.join(', ') : '';
+  document.getElementById('cfg-theme').value              = cfg.theme || 'forest-green';
+  document.getElementById('cfg-custom_disclaimer').value  = cfg.custom_disclaimer || '';
+
+  const addonsC = document.getElementById('cfg-addons');
+  addonsC.innerHTML = '';
+  (Array.isArray(cfg.add_ons) ? cfg.add_ons : []).forEach(a => addAddonRow(a.name || '', a.low ?? '', a.high ?? ''));
+
+  document.getElementById('config-error').style.display = 'none';
+  document.getElementById('config-modal').classList.add('open');
+}
+
+function closeConfigModal() {
+  configCustomerId = null;
+  document.getElementById('config-modal').classList.remove('open');
+}
+
+// DOM-built (not innerHTML) so add-on names can't break out of an attribute.
+function addAddonRow(name = '', low = '', high = '') {
+  const row = document.createElement('div');
+  row.className = 'addon-row';
+  const nameI = document.createElement('input');
+  nameI.type = 'text'; nameI.placeholder = 'Add-on name'; nameI.className = 'addon-name'; nameI.value = name;
+  const lowI = document.createElement('input');
+  lowI.type = 'number'; lowI.placeholder = 'Low $'; lowI.min = '0'; lowI.className = 'addon-low'; lowI.value = low;
+  const highI = document.createElement('input');
+  highI.type = 'number'; highI.placeholder = 'High $'; highI.min = '0'; highI.className = 'addon-high'; highI.value = high;
+  const rm = document.createElement('button');
+  rm.type = 'button'; rm.className = 'addon-remove'; rm.title = 'Remove'; rm.textContent = '×';
+  rm.onclick = () => row.remove();
+  row.append(nameI, lowI, highI, rm);
+  document.getElementById('cfg-addons').appendChild(row);
+}
+
+function gatherAddons() {
+  const out = [];
+  document.querySelectorAll('#cfg-addons .addon-row').forEach(r => {
+    const name = r.querySelector('.addon-name').value.trim();
+    if (!name) return;
+    out.push({
+      name,
+      low:  Number(r.querySelector('.addon-low').value)  || 0,
+      high: Number(r.querySelector('.addon-high').value) || 0,
+    });
+  });
+  return out;
+}
+
+function showConfigError(msg) {
+  const el = document.getElementById('config-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function confirmEditConfig() {
+  if (!configCustomerId) return;
+
+  const config = {
+    business_name:        document.getElementById('cfg-business_name').value.trim(),
+    phone:                document.getElementById('cfg-phone').value.trim(),
+    removal_low:          document.getElementById('cfg-removal_low').value,
+    removal_high:         document.getElementById('cfg-removal_high').value,
+    trimming_low:         document.getElementById('cfg-trimming_low').value,
+    trimming_high:        document.getElementById('cfg-trimming_high').value,
+    minimum_job:          document.getElementById('cfg-minimum_job').value,
+    emergency_multiplier: document.getElementById('cfg-emergency_multiplier').value,
+    service_zips:         document.getElementById('cfg-service_zips').value.split(',').map(s => s.trim()).filter(Boolean),
+    add_ons:              gatherAddons(),
+    theme:                document.getElementById('cfg-theme').value,
+    custom_disclaimer:    document.getElementById('cfg-custom_disclaimer').value.trim() || null,
+  };
+
+  // Client-side mirror of the server validation (server is the source of truth).
+  if (!config.business_name) return showConfigError('Business name is required.');
+  const rl = Number(config.removal_low),  rh = Number(config.removal_high);
+  const tl = Number(config.trimming_low), th = Number(config.trimming_high);
+  if (config.removal_low !== '' && config.removal_high !== '' && rl >= rh) return showConfigError('Removal high must be greater than low.');
+  if (config.trimming_low !== '' && config.trimming_high !== '' && tl >= th) return showConfigError('Trimming high must be greater than low.');
+  if (config.emergency_multiplier !== '' && Number(config.emergency_multiplier) < 1) return showConfigError('Emergency multiplier must be at least 1.');
+  for (const a of config.add_ons) {
+    if (a.high < a.low) return showConfigError(`Add-on "${a.name}" high price must be ≥ low price.`);
+  }
+
+  const saveBtn = document.getElementById('config-save-btn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  document.getElementById('config-error').style.display = 'none';
+
+  try {
+    const result = await apiPost({ action: 'edit-config', customerId: configCustomerId, config });
+    const idx = customersData.findIndex(c => c.id === configCustomerId);
+    // Merge the fresh row back; preserve client-only fields (usage, limit).
+    if (idx !== -1 && result.customer) {
+      customersData[idx] = { ...customersData[idx], ...result.customer };
+    }
+    closeConfigModal();
+    renderTable();
+  } catch (err) {
+    showConfigError(err.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save Changes';
+  }
 }
 
 // -----------------------------------------------------------------------

@@ -4,7 +4,7 @@
 import { supabase } from '../lib/supabase.js';
 import {
   approveLead, rejectLead, resendOnboarding,
-  upgradeCustomer, extendTrial, togglePause, deleteCustomer,
+  upgradeCustomer, extendTrial, togglePause, editConfig, deleteCustomer,
 } from '../lib/admin-actions.js';
 
 const TIER_LIMITS = { starter: 50, pro: 250, proplus: 'Unlimited' };
@@ -17,6 +17,7 @@ const POST_ACTIONS = {
   'upgrade':      upgradeCustomer,
   'extend-trial': extendTrial,
   'toggle-pause': togglePause,
+  'edit-config':  editConfig,
   'delete':       deleteCustomer,
 };
 
