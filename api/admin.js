@@ -2,8 +2,23 @@
 // All actions require ADMIN_PASSWORD in the request body or query string.
 
 import { supabase } from '../lib/supabase.js';
+import {
+  approveLead, rejectLead, resendOnboarding,
+  upgradeCustomer, extendTrial, togglePause, deleteCustomer,
+} from '../lib/admin-actions.js';
 
 const TIER_LIMITS = { starter: 50, pro: 250, proplus: 'Unlimited' };
+
+// POST action name → handler. Each runs only after the password check below.
+const POST_ACTIONS = {
+  'approve':      approveLead,
+  'reject':       rejectLead,
+  'resend':       resendOnboarding,
+  'upgrade':      upgradeCustomer,
+  'extend-trial': extendTrial,
+  'toggle-pause': togglePause,
+  'delete':       deleteCustomer,
+};
 
 function checkPassword(req) {
   const adminPassword = process.env.ADMIN_PASSWORD;
@@ -67,61 +82,14 @@ export default async function handler(req, res) {
   }
 
   // -------------------------------------------------------------------------
-  // POST — mutate actions
+  // POST — mutate actions (handlers live in lib/admin-actions.js)
   // -------------------------------------------------------------------------
   if (req.method === 'POST') {
-    const { action, customerId } = req.body ?? {};
-
-    if (!action || !customerId) {
-      return res.status(400).json({ error: 'Missing action or customerId' });
-    }
-
-    if (action === 'extend-trial') {
-      const { data: customer, error: fetchError } = await supabase
-        .from('customers')
-        .select('trial_end')
-        .eq('id', customerId)
-        .single();
-
-      if (fetchError || !customer) {
-        return res.status(404).json({ error: 'Customer not found' });
-      }
-
-      const newEnd = new Date(customer.trial_end);
-      newEnd.setDate(newEnd.getDate() + 7);
-
-      const { error } = await supabase
-        .from('customers')
-        .update({ trial_end: newEnd.toISOString(), trial_extended: true })
-        .eq('id', customerId);
-
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ success: true, new_trial_end: newEnd.toISOString() });
-    }
-
-    if (action === 'toggle-pause') {
-      const { data: customer, error: fetchError } = await supabase
-        .from('customers')
-        .select('status')
-        .eq('id', customerId)
-        .single();
-
-      if (fetchError || !customer) {
-        return res.status(404).json({ error: 'Customer not found' });
-      }
-
-      const newStatus = customer.status === 'paused' ? 'active' : 'paused';
-
-      const { error } = await supabase
-        .from('customers')
-        .update({ status: newStatus })
-        .eq('id', customerId);
-
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ success: true, new_status: newStatus });
-    }
-
-    return res.status(400).json({ error: 'Unknown action' });
+    const { action } = req.body ?? {};
+    // hasOwn guard so inherited props ('constructor', 'toString', …) can't be invoked.
+    const fn = Object.hasOwn(POST_ACTIONS, action) ? POST_ACTIONS[action] : null;
+    if (typeof fn !== 'function') return res.status(400).json({ error: `Unknown action: ${action}` });
+    return fn(req, res);
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
