@@ -159,39 +159,52 @@
     .detail-row { display: none; }
     .detail-row.open { display: table-row; }
     .detail-row td {
-      background: rgba(34,197,94,0.03);
+      background: rgba(34,197,94,0.04);
       border-bottom: 1px solid var(--border);
-      padding: 16px 20px;
+      padding: 18px 22px;
       cursor: default;
     }
+    .detail-panel { display: flex; flex-direction: column; gap: 14px; }
+
+    /* ---- Cards within the expanded panel ---- */
+    .dcard {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .dcard-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-bottom: 13px;
+    }
+    .dcard-head h4 {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted);
+    }
+
     .detail-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 12px 24px;
-      margin-bottom: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 14px 24px;
     }
-    .detail-item label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
-    .detail-item span  { font-size: 13px; word-break: break-all; }
+    .detail-item label { display: block; color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .detail-item span  { font-size: 13px; }
+    .detail-item span.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--muted); word-break: break-all; }
 
-    /* ---- Config section ---- */
-    .config-section {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px 16px;
-      margin-bottom: 14px;
-    }
-    .config-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; }
     .config-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 8px 20px;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 14px 20px;
     }
-    .config-item label { display: block; color: var(--muted); font-size: 11px; }
+    .config-item label { display: block; color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
     .config-item span  { font-size: 13px; }
+    .config-item span.unset { color: var(--muted); }
+    .config-item.full { grid-column: 1 / -1; }
+    .theme-swatch { display: inline-flex; align-items: center; gap: 6px; }
+    .theme-swatch .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 1px solid rgba(255,255,255,0.15); }
 
     /* ---- Action buttons ---- */
-    .action-row { display: flex; gap: 8px; }
+    .action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .btn {
       padding: 6px 14px;
       border-radius: 6px;
@@ -208,6 +221,7 @@
     .btn-danger  { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
     .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
     .btn-login   { background: var(--green); color: #000; width: 100%; padding: 10px; font-size: 14px; }
+    .btn-sm      { padding: 4px 12px; font-size: 11px; }
 
     .action-feedback { font-size: 12px; color: var(--green); margin-left: 8px; }
     .action-error    { font-size: 12px; color: var(--red); margin-left: 8px; }
@@ -294,7 +308,7 @@
     .cfg-field textarea { resize: vertical; min-height: 64px; }
     .cfg-field input:focus, .cfg-field select:focus, .cfg-field textarea:focus { outline: none; border-color: var(--green); }
     .addon-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
-    .addon-row input { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; }
+    .addon-row input { min-width: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; }
     .addon-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 8px; }
     .cfg-error { color: var(--red); font-size: 13px; display: none; }
   </style>
@@ -662,15 +676,40 @@ function renderTable() {
     const detailId = `detail-${i}`;
     const cfg = c.customer_config || {};
 
-    // Build config HTML
+    // Build config display (richer than the editor's summary — shows what the
+    // customer actually set, with theme swatch, add-on names, and disclaimer).
+    const THEME_META = {
+      'forest-green': ['Forest Green',  '#16a34a'],
+      'deep-navy':    ['Deep Navy',     '#1d4ed8'],
+      'slate-gray':   ['Slate Gray',    '#475569'],
+      'burnt-orange': ['Burnt Orange',  '#ea580c'],
+      'burgundy-red': ['Burgundy Red',  '#9f1239'],
+      'charcoal':     ['Charcoal Black', '#1c1c1c'],
+    };
+    const removal    = cfg.base_rate_removal_low  ? `$${cfg.base_rate_removal_low}–$${cfg.base_rate_removal_high}`   : null;
+    const trimming   = cfg.base_rate_trimming_low ? `$${cfg.base_rate_trimming_low}–$${cfg.base_rate_trimming_high}` : null;
+    const minJob     = cfg.minimum_job ? `$${cfg.minimum_job}` : null;
+    const emerg      = cfg.emergency_multiplier != null ? `${cfg.emergency_multiplier}×` : null;
+    const zips       = cfg.service_zips?.length ? escape(cfg.service_zips.join(', ')) : null;
+    const addons     = cfg.add_ons?.length ? escape(cfg.add_ons.map(a => a.name).join(', ')) : null;
+    const disclaimer = cfg.custom_disclaimer ? escape(cfg.custom_disclaimer) : null;
+    const tMeta      = THEME_META[cfg.theme] || THEME_META['forest-green'];
+
+    const cItem = (label, val, unset = '—') =>
+      `<div class="config-item"><label>${label}</label>${val != null
+        ? `<span>${val}</span>`
+        : `<span class="unset">${unset}</span>`}</div>`;
+
     const configHtml = `
       <div class="config-grid">
-        <div class="config-item"><label>Removal Rate</label><span>${cfg.base_rate_removal_low ? '$'+cfg.base_rate_removal_low+'–$'+cfg.base_rate_removal_high : '—'}</span></div>
-        <div class="config-item"><label>Trimming Rate</label><span>${cfg.base_rate_trimming_low ? '$'+cfg.base_rate_trimming_low+'–$'+cfg.base_rate_trimming_high : '—'}</span></div>
-        <div class="config-item"><label>Min Job</label><span>${cfg.minimum_job ? '$'+cfg.minimum_job : '—'}</span></div>
-        <div class="config-item"><label>Emergency Mult</label><span>${cfg.emergency_multiplier ?? '1.5'}x</span></div>
-        <div class="config-item"><label>Service Zips</label><span>${cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'All'}</span></div>
-        <div class="config-item"><label>Add-ons</label><span>${cfg.add_ons?.length ? cfg.add_ons.length+' configured' : 'Default'}</span></div>
+        ${cItem('Removal Rate', removal)}
+        ${cItem('Trimming Rate', trimming)}
+        ${cItem('Minimum Job', minJob)}
+        ${cItem('Emergency Mult', emerg)}
+        <div class="config-item"><label>Theme</label><span class="theme-swatch"><span class="dot" style="background:${tMeta[1]}"></span>${tMeta[0]}</span></div>
+        ${cItem('Service Zips', zips, 'All areas')}
+        ${cItem('Add-ons', addons, 'None')}
+        ${disclaimer ? `<div class="config-item full"><label>Custom Disclaimer</label><span>${disclaimer}</span></div>` : ''}
       </div>`;
 
     // Can we extend trial?
@@ -698,28 +737,37 @@ function renderTable() {
 </tr>
 <tr class="detail-row" id="${detailId}">
   <td colspan="7">
-    <div class="detail-grid">
-      <div class="detail-item"><label>Owner</label><span>${escape(c.owner_name)}</span></div>
-      <div class="detail-item"><label>Email</label><span><a href="mailto:${escape(c.email)}" style="color:var(--green)">${escape(c.email)}</a></span></div>
-      <div class="detail-item"><label>Phone</label><span>${escape(c.phone || '—')}</span></div>
-      <div class="detail-item"><label>Business Name</label><span>${escape(c.business_name || c.company_name)}</span></div>
-      <div class="detail-item"><label>Stripe Customer ID</label><span style="font-size:12px;color:var(--muted)">${escape(c.stripe_customer_id || '—')}</span></div>
-      <div class="detail-item"><label>Stripe Subscription ID</label><span style="font-size:12px;color:var(--muted)">${escape(c.stripe_subscription_id || '—')}</span></div>
-      <div class="detail-item"><label>Trial Extended</label><span>${c.trial_extended ? 'Yes' : 'No'}</span></div>
-      <div class="detail-item"><label>Period End</label><span>${fmtDate(c.current_period_end)}</span></div>
-    </div>
-    <div class="config-section">
-      <h4>Pricing Config</h4>
-      ${configHtml}
-    </div>
-    <div class="action-row" id="actions-${i}">
-      ${canExtend ? `<button class="btn btn-outline" onclick="openExtendModal('${escape(c.id)}',${i},'${escape(c.trial_end)}')">Extend Trial</button>` : ''}
-      ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
-      ${upgradeBtns}
-      <button class="btn btn-outline" onclick="openConfigModal(${i})">Edit Config</button>
-      <button class="btn btn-danger" onclick="openDeleteModal('${escape(c.id)}','${escape(c.subdomain)}')">Delete</button>
-      <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
-      <span class="action-error"    id="error-${i}"    style="display:none"></span>
+    <div class="detail-panel">
+      <section class="dcard">
+        <div class="dcard-head"><h4>Account</h4></div>
+        <div class="detail-grid">
+          <div class="detail-item"><label>Owner</label><span>${escape(c.owner_name)}</span></div>
+          <div class="detail-item"><label>Email</label><span><a href="mailto:${escape(c.email)}" style="color:var(--green)">${escape(c.email)}</a></span></div>
+          <div class="detail-item"><label>Phone</label><span>${escape(c.phone || '—')}</span></div>
+          <div class="detail-item"><label>Business Name</label><span>${escape(c.business_name || c.company_name)}</span></div>
+          <div class="detail-item"><label>Period End</label><span>${fmtDate(c.current_period_end)}</span></div>
+          <div class="detail-item"><label>Trial Extended</label><span>${c.trial_extended ? 'Yes' : 'No'}</span></div>
+          <div class="detail-item"><label>Stripe Customer</label><span class="mono">${escape(c.stripe_customer_id || '—')}</span></div>
+          <div class="detail-item"><label>Stripe Subscription</label><span class="mono">${escape(c.stripe_subscription_id || '—')}</span></div>
+        </div>
+      </section>
+
+      <section class="dcard">
+        <div class="dcard-head">
+          <h4>Pricing &amp; Customization</h4>
+          <button class="btn btn-primary btn-sm" onclick="openConfigModal(${i})">Edit</button>
+        </div>
+        ${configHtml}
+      </section>
+
+      <div class="action-row" id="actions-${i}">
+        ${canExtend ? `<button class="btn btn-outline" onclick="openExtendModal('${escape(c.id)}',${i},'${escape(c.trial_end)}')">Extend Trial</button>` : ''}
+        ${canPause ? `<button class="btn ${pauseClass}" onclick="togglePause('${escape(c.id)}',${i})">${pauseLabel}</button>` : ''}
+        ${upgradeBtns}
+        <button class="btn btn-danger" onclick="openDeleteModal('${escape(c.id)}','${escape(c.subdomain)}')">Delete</button>
+        <span class="action-feedback" id="feedback-${i}" style="display:none"></span>
+        <span class="action-error"    id="error-${i}"    style="display:none"></span>
+      </div>
     </div>
   </td>
 </tr>`;
