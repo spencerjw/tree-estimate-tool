@@ -129,12 +129,13 @@ export default async function handler(req, res) {
     const appUrl  = process.env.APP_URL ?? 'https://app.treesnap.cloud';
 
     const session = await stripe.checkout.sessions.create({
-      mode:           'payment',
-      line_items:     [{ price: priceId, quantity: 1 }],
-      customer_email: lead.email,
-      metadata:       { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
-      success_url:    `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:     `${appUrl}/onboard?token=${token}`,
+      mode:                  'payment',
+      line_items:            [{ price: priceId, quantity: 1 }],
+      customer_email:        lead.email,
+      allow_promotion_codes: true,  // lets a customer enter a promo/discount code (e.g. a 100%-off test code)
+      metadata:              { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
+      success_url:           `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:            `${appUrl}/onboard?token=${token}`,
     });
 
     return res.status(200).json({ success: true, checkoutUrl: session.url });
