@@ -416,6 +416,7 @@
         <div class="cfg-grid">
           <div class="cfg-field"><label>Business Name</label><input type="text" id="cfg-business_name" /></div>
           <div class="cfg-field"><label>Phone</label><input type="text" id="cfg-phone" /></div>
+          <div class="cfg-field full"><label>Email (login + billing + notifications)</label><input type="email" id="cfg-email" autocomplete="off" /></div>
         </div>
       </div>
       <div>
@@ -877,6 +878,7 @@ function openConfigModal(i) {
   document.getElementById('config-company').textContent = c.company_name || c.subdomain;
   document.getElementById('cfg-business_name').value      = c.business_name || c.company_name || '';
   document.getElementById('cfg-phone').value              = c.phone || '';
+  document.getElementById('cfg-email').value              = c.email || '';
   document.getElementById('cfg-removal_low').value        = cfg.base_rate_removal_low   ?? '';
   document.getElementById('cfg-removal_high').value       = cfg.base_rate_removal_high  ?? '';
   document.getElementById('cfg-trimming_low').value       = cfg.base_rate_trimming_low  ?? '';
@@ -943,6 +945,7 @@ async function confirmEditConfig() {
   const config = {
     business_name:        document.getElementById('cfg-business_name').value.trim(),
     phone:                document.getElementById('cfg-phone').value.trim(),
+    email:                document.getElementById('cfg-email').value.trim(),
     removal_low:          document.getElementById('cfg-removal_low').value,
     removal_high:         document.getElementById('cfg-removal_high').value,
     trimming_low:         document.getElementById('cfg-trimming_low').value,
@@ -957,6 +960,7 @@ async function confirmEditConfig() {
 
   // Client-side mirror of the server validation (server is the source of truth).
   if (!config.business_name) return showConfigError('Business name is required.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email)) return showConfigError('A valid email address is required.');
   const rl = Number(config.removal_low),  rh = Number(config.removal_high);
   const tl = Number(config.trimming_low), th = Number(config.trimming_high);
   if (config.removal_low !== '' && config.removal_high !== '' && rl >= rh) return showConfigError('Removal high must be greater than low.');
@@ -980,6 +984,9 @@ async function confirmEditConfig() {
     }
     closeConfigModal();
     renderTable();
+    if (result.warnings && result.warnings.length) {
+      alert('Saved — but with warnings:\n• ' + result.warnings.join('\n• '));
+    }
   } catch (err) {
     showConfigError(err.message);
   } finally {
