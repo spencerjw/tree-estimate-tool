@@ -277,6 +277,17 @@ input.invalid {
   box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
 }
 
+/* 16px inputs on touch devices stop iOS Safari's focus auto-zoom
+   (sub-16px inputs make Safari zoom in on focus, leaving the page
+   panning sideways while scrolling). Must follow the base input rules. */
+@media (pointer: coarse), (max-width: 540px) {
+  input[type="text"],
+  input[type="tel"],
+  input[type="email"] {
+    font-size: 16px;
+  }
+}
+
 .field-error {
   font-size: 0.78rem;
   color: var(--red);
