@@ -324,6 +324,26 @@
     .addon-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 8px; }
     .cfg-error { color: var(--red); font-size: 13px; display: none; }
 
+    /* ---- Service-zips tag input (mirrors onboarding) ---- */
+    .zip-input-wrap {
+      min-height: 40px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 5px 10px; display: flex; flex-wrap: wrap;
+      gap: 6px; align-items: center; cursor: text;
+    }
+    .zip-input-wrap:focus-within { border-color: var(--green); }
+    .zip-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(34,197,94,0.12); color: var(--green);
+      border-radius: 4px; padding: 2px 8px; font-size: 13px; font-weight: 500;
+    }
+    .zip-tag button { background: none; border: none; cursor: pointer; color: var(--muted); padding: 0; line-height: 1; font-size: 14px; }
+    .zip-tag button:hover { color: var(--red); }
+    .zip-text-input {
+      border: none !important; background: transparent !important; padding: 2px 4px !important;
+      flex: 1; min-width: 80px; outline: none !important;
+      color: var(--text); font-size: 14px; font-family: inherit;
+    }
+
     /* ≥16px inputs prevent iOS focus auto-zoom everywhere. pointer:coarse covers
        iPads/tablets wider than the 720px layout breakpoint — Safari zooms at any width.
        !important is load-bearing: it must outrank .cfg-field input (14px) and .addon-row input (13px). */
@@ -504,7 +524,11 @@
       </div>
       <div>
         <div class="cfg-section-title">Service Area</div>
-        <div class="cfg-field full"><label>Service Zip Codes (comma-separated — blank = all areas)</label><input type="text" id="cfg-service_zips" placeholder="78006, 78015, 78163" /></div>
+        <div class="cfg-field full"><label>Service Zip Codes (blank = all areas)</label>
+          <div class="zip-input-wrap" id="cfg-zip-wrap" onclick="document.getElementById('cfg-zip-text').focus()">
+            <input type="text" id="cfg-zip-text" class="zip-text-input" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="Type a 5-digit zip…" autocomplete="off" />
+          </div>
+        </div>
       </div>
       <div>
         <div class="cfg-section-title">Add-ons</div>
@@ -960,7 +984,9 @@ function openConfigModal(i) {
   document.getElementById('cfg-trimming_high').value      = cfg.base_rate_trimming_high ?? '';
   document.getElementById('cfg-minimum_job').value        = cfg.minimum_job             ?? '';
   document.getElementById('cfg-emergency_multiplier').value = cfg.emergency_multiplier  ?? '';
-  document.getElementById('cfg-service_zips').value       = Array.isArray(cfg.service_zips) ? cfg.service_zips.join(', ') : '';
+  cfgZips = Array.isArray(cfg.service_zips) ? cfg.service_zips.map(String) : [];
+  renderCfgZips();
+  document.getElementById('cfg-zip-text').value = '';
   document.getElementById('cfg-theme').value              = cfg.theme || 'forest-green';
   document.getElementById('cfg-custom_disclaimer').value  = cfg.custom_disclaimer || '';
 
@@ -994,6 +1020,65 @@ function addAddonRow(name = '', low = '', high = '') {
   document.getElementById('cfg-addons').appendChild(row);
 }
 
+// ---- Service-zips tag input (mirrors onboarding) ----
+let cfgZips = [];
+
+function addCfgZip(zip) {
+  zip = String(zip).replace(/\s/g, '');
+  // US zips only — exactly 5 digits for new entries (legacy values still load as tags)
+  if (!zip || !/^\d{5}$/.test(zip) || cfgZips.includes(zip)) return;
+  cfgZips.push(zip);
+  renderCfgZips();
+}
+
+// DOM-built (not innerHTML), same as addAddonRow.
+function renderCfgZips() {
+  const wrap  = document.getElementById('cfg-zip-wrap');
+  const input = document.getElementById('cfg-zip-text');
+  wrap.querySelectorAll('.zip-tag').forEach(el => el.remove());
+  cfgZips.forEach((zip, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'zip-tag';
+    tag.textContent = zip;
+    const rm = document.createElement('button');
+    rm.type = 'button'; rm.setAttribute('aria-label', `Remove ${zip}`); rm.textContent = '×';
+    rm.onclick = () => { cfgZips.splice(i, 1); renderCfgZips(); };
+    tag.appendChild(rm);
+    wrap.insertBefore(tag, input);
+  });
+}
+
+(function setupCfgZipInput() {
+  const input = document.getElementById('cfg-zip-text');
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addCfgZip(input.value.replace(/,$/, ''));
+      input.value = '';
+    } else if (e.key === 'Backspace' && input.value === '' && cfgZips.length > 0) {
+      cfgZips.pop();
+      renderCfgZips();
+    }
+  });
+
+  // Mobile numeric keyboards have no comma (and sometimes no Enter) key —
+  // auto-commit each zip as soon as 5 digits are typed (same as onboarding).
+  input.addEventListener('input', () => {
+    let digits = input.value.replace(/\D/g, '');
+    while (digits.length >= 5) {
+      addCfgZip(digits.slice(0, 5));
+      digits = digits.slice(5);
+    }
+    if (input.value !== digits) input.value = digits;
+  });
+
+  input.addEventListener('blur', () => {
+    const val = input.value.trim().replace(/,$/, '');
+    if (val) { addCfgZip(val); input.value = ''; }
+  });
+})();
+
 function gatherAddons() {
   const out = [];
   document.querySelectorAll('#cfg-addons .addon-row').forEach(r => {
@@ -1017,6 +1102,10 @@ function showConfigError(msg) {
 async function confirmEditConfig() {
   if (!configCustomerId) return;
 
+  // Flush a zip still sitting in the tag input (e.g. typed then Save tapped directly)
+  const pendingZip = document.getElementById('cfg-zip-text');
+  if (pendingZip.value.trim()) { addCfgZip(pendingZip.value.trim()); pendingZip.value = ''; }
+
   const config = {
     business_name:        document.getElementById('cfg-business_name').value.trim(),
     phone:                document.getElementById('cfg-phone').value.trim(),
@@ -1027,7 +1116,7 @@ async function confirmEditConfig() {
     trimming_high:        document.getElementById('cfg-trimming_high').value,
     minimum_job:          document.getElementById('cfg-minimum_job').value,
     emergency_multiplier: document.getElementById('cfg-emergency_multiplier').value,
-    service_zips:         document.getElementById('cfg-service_zips').value.split(',').map(s => s.trim()).filter(Boolean),
+    service_zips:         cfgZips.slice(),
     add_ons:              gatherAddons(),
     theme:                document.getElementById('cfg-theme').value,
     custom_disclaimer:    document.getElementById('cfg-custom_disclaimer').value.trim() || null,
