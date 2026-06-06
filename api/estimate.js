@@ -80,6 +80,8 @@ function buildSystemPrompt(customer, config) {
     ? cfg.add_ons.map(a => `${a.name} ($${a.low}–$${a.high})`).join(', ')
     : 'Stump grinding ($125–$300), Debris haul-away ($100–$250)';
 
+  const marketLine = cfg.market ? `\n- Market / service region: ${cfg.market}` : '';
+
   return `You are an AI assistant for ${businessName}, a professional tree service company.
 Analyze the provided tree photos and generate a detailed estimate.
 
@@ -87,7 +89,7 @@ PRICING GUIDELINES FOR THIS COMPANY:
 - Tree removal: ${removalRange} base range
 - Trimming/pruning: ${trimmingRange} base range
 - Minimum job: ${minJob}
-- Emergency service multiplier: ${emergencyMult}x standard rates
+- Emergency service multiplier: ${emergencyMult}x standard rates${marketLine}
 - Service area zip codes: ${serviceZips}
 - Available add-ons: ${addOnsText}
 

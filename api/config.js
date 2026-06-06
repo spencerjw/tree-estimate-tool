@@ -24,14 +24,14 @@ export default async function handler(req, res) {
   const host = req.headers.host ?? '';
 
   if (isDemoHost(host)) {
-    return res.status(200).json({ businessName: 'TreePro Demo', phone: '', subdomain: 'demo' });
+    return res.status(200).json({ businessName: 'TreePro Demo', phone: '', subdomain: 'demo', market: 'Central Texas' });
   }
 
   const subdomain = host.split('.')[0].toLowerCase();
 
   const { data: customer } = await supabase
     .from('customers')
-    .select('business_name, company_name, phone, status, customer_config(theme)')
+    .select('business_name, company_name, phone, status, customer_config(theme, market)')
     .eq('subdomain', subdomain)
     .single();
 
@@ -44,6 +44,7 @@ export default async function handler(req, res) {
     phone:        customer.phone || '',
     status:       customer.status,
     theme:        customer.customer_config?.theme || 'forest-green',
+    market:       customer.customer_config?.market || null,
     subdomain,
   });
 }

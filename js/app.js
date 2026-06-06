@@ -246,7 +246,7 @@ function validateForm() {
 const LOADING_STEPS = [
   'Identifying species and size…',
   'Assessing condition and complexity…',
-  'Calculating Central Texas market rates…',
+  'Calculating local market rates…', // personalized to "<market> market rates" once config loads
   'Finalizing your estimate…',
 ];
 
@@ -457,7 +457,7 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
   try {
     const resp = await fetch('/api/config');
     if (!resp.ok) return;
-    const { businessName, phone, theme, subdomain } = await resp.json();
+    const { businessName, phone, theme, subdomain, market } = await resp.json();
 
     // Tag every subsequent GA4 hit with the tenant (hostname is also auto-captured).
     TENANT = subdomain || '';
@@ -481,6 +481,14 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
         root.style.setProperty('--green-soft',   t.soft);
         root.style.setProperty('--green-glow',   t.glow);
       }
+    }
+
+    // Localize the header tagline + loading copy to the tenant's market
+    // (e.g. "Greater Atlanta Tree Experts"). No market set → generic defaults stand.
+    if (market) {
+      const tagline = document.querySelector('.header-tagline');
+      if (tagline) tagline.textContent = `${market} Tree Experts`;
+      LOADING_STEPS[2] = `Calculating ${market} market rates…`;
     }
 
     if (businessName) {

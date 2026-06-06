@@ -363,6 +363,11 @@
       <!-- Section 2: Service Area -->
       <div class="section">
         <div class="section-title">Service Area</div>
+        <div class="field field-row single" style="margin-bottom:16px;">
+          <label for="market">Service Area Name <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+          <input type="text" id="market" name="market" maxlength="40" placeholder="Central Texas" autocomplete="off" />
+          <span class="field-note">Shown on your estimate page — e.g. "Central Texas Tree Experts". Leave blank for a generic tagline.</span>
+        </div>
         <div class="field field-row single">
           <label>Service Area Zip Codes</label>
           <div class="zip-input-wrap" id="zip-wrap" onclick="document.getElementById('zip-text').focus()">
@@ -745,6 +750,7 @@ document.getElementById('onboard-form').addEventListener('submit', async functio
     token:                TOKEN,
     business_name:        businessName,
     phone,
+    market:               document.getElementById('market').value.trim() || null,
     service_zips:         zipCodes,
     removal_low:          removalLow,
     removal_high:         removalHigh,

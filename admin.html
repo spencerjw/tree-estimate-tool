@@ -529,6 +529,7 @@
       </div>
       <div>
         <div class="cfg-section-title">Service Area</div>
+        <div class="cfg-field full"><label>Service Area Name (shown as "&lt;name&gt; Tree Experts" on their page — blank = generic)</label><input type="text" id="cfg-market" maxlength="40" placeholder="Central Texas" autocomplete="off" /></div>
         <div class="cfg-field full"><label>Service Zip Codes (blank = all areas)</label>
           <div class="zip-input-wrap" id="cfg-zip-wrap" onclick="document.getElementById('cfg-zip-text').focus()">
             <input type="text" id="cfg-zip-text" class="zip-text-input" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="Type a 5-digit zip…" autocomplete="off" />
@@ -800,6 +801,7 @@ function renderTable() {
     const trimming   = cfg.base_rate_trimming_low ? `$${cfg.base_rate_trimming_low}–$${cfg.base_rate_trimming_high}` : null;
     const minJob     = cfg.minimum_job ? `$${cfg.minimum_job}` : null;
     const emerg      = cfg.emergency_multiplier != null ? `${cfg.emergency_multiplier}×` : null;
+    const market     = cfg.market ? escape(cfg.market) : null;
     const zips       = cfg.service_zips?.length ? escape(cfg.service_zips.join(', ')) : null;
     const addons     = cfg.add_ons?.length ? escape(cfg.add_ons.map(a => a.name).join(', ')) : null;
     const disclaimer = cfg.custom_disclaimer ? escape(cfg.custom_disclaimer) : null;
@@ -817,6 +819,7 @@ function renderTable() {
         ${cItem('Minimum Job', minJob)}
         ${cItem('Emergency Mult', emerg)}
         <div class="config-item"><label>Theme</label><span class="theme-swatch"><span class="dot" style="background:${tMeta[1]}"></span>${tMeta[0]}</span></div>
+        ${cItem('Service Area', market, 'Generic tagline')}
         ${cItem('Service Zips', zips, 'All areas')}
         ${cItem('Add-ons', addons, 'None')}
         ${disclaimer ? `<div class="config-item full"><label>Custom Disclaimer</label><span>${disclaimer}</span></div>` : ''}
@@ -996,6 +999,7 @@ function openConfigModal(i) {
   document.getElementById('cfg-trimming_high').value      = cfg.base_rate_trimming_high ?? '';
   document.getElementById('cfg-minimum_job').value        = cfg.minimum_job             ?? '';
   document.getElementById('cfg-emergency_multiplier').value = cfg.emergency_multiplier  ?? '';
+  document.getElementById('cfg-market').value          = cfg.market || '';
   cfgZips = Array.isArray(cfg.service_zips) ? cfg.service_zips.map(String) : [];
   renderCfgZips();
   document.getElementById('cfg-zip-text').value = '';
@@ -1128,6 +1132,7 @@ async function confirmEditConfig() {
     trimming_high:        document.getElementById('cfg-trimming_high').value,
     minimum_job:          document.getElementById('cfg-minimum_job').value,
     emergency_multiplier: document.getElementById('cfg-emergency_multiplier').value,
+    market:               document.getElementById('cfg-market').value.trim() || null,
     service_zips:         cfgZips.slice(),
     add_ons:              gatherAddons(),
     theme:                document.getElementById('cfg-theme').value,

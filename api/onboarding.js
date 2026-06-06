@@ -67,6 +67,7 @@ export default async function handler(req, res) {
       token,
       business_name,
       phone,
+      market,
       service_zips,
       removal_low,
       removal_high,
@@ -92,6 +93,7 @@ export default async function handler(req, res) {
     const onboardingConfig = {
       business_name,
       phone,
+      market:                market ? String(market).trim().slice(0, 40) || null : null,
       service_zips:          Array.isArray(service_zips) ? service_zips : [],
       removal_low:           Number(removal_low),
       removal_high:          Number(removal_high),
