@@ -56,6 +56,7 @@
       align-items: center;
       justify-content: center;
       min-height: calc(100vh - 56px);
+      min-height: calc(100dvh - 56px); /* stable when the mobile keyboard opens */
       gap: 16px;
     }
     .login-card {
@@ -64,6 +65,7 @@
       border-radius: 10px;
       padding: 32px;
       width: 320px;
+      max-width: calc(100vw - 32px);
       display: flex;
       flex-direction: column;
       gap: 16px;
@@ -76,8 +78,16 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--text);
-      font-size: 14px;
+      font-size: 16px; /* ≥16px prevents iOS focus auto-zoom */
       font-family: inherit;
+    }
+    .visually-hidden {
+      position: absolute;
+      width: 1px; height: 1px;
+      margin: -1px; padding: 0; border: 0;
+      clip: rect(0 0 0 0);
+      overflow: hidden;
+      white-space: nowrap;
     }
     .login-card input:focus { outline: none; border-color: var(--green); }
     .login-error { color: var(--red); font-size: 13px; display: none; }
@@ -311,6 +321,61 @@
     .addon-row input { min-width: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; }
     .addon-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 8px; }
     .cfg-error { color: var(--red); font-size: 13px; display: none; }
+
+    /* ================= Mobile (≤720px) ================= */
+    @media (max-width: 720px) {
+      #admin-screen { padding: 12px; }
+      .admin-header { padding: 0 16px; }
+
+      /* ≥16px inputs prevent iOS focus auto-zoom everywhere.
+         !important is load-bearing: it must outrank .cfg-field input (14px) and .addon-row input (13px). */
+      input, select, textarea { font-size: 16px !important; }
+
+      /* Stats: 2-up grid instead of a single overflow row */
+      .stats-row { display: grid; grid-template-columns: 1fr 1fr; }
+      .stat-card { min-width: 0; padding: 12px 14px; }
+      .stat-card .stat-value { font-size: 20px; }
+
+      /* Tables → stacked cards. Cell labels come from data-label attributes
+         (keep them in sync with the <th> text in the static thead). */
+      table, tbody, tr, td { display: block; }
+      thead { display: none; }
+      .table-wrap { overflow: visible; }
+      tbody tr { padding: 12px 14px; position: relative; }
+      td { padding: 4px 0; }
+      td[data-label] { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+      td[data-label] > * { overflow-wrap: anywhere; text-align: right; }
+      td[data-label]::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+      }
+      /* The usage bar's flex:1 collapses inside the label/value flex cell — give it a fixed width */
+      td[data-label] .usage-bar-bg { flex: 0 0 80px; }
+      /* Keep the ›/⌄ expand chevron as a tap affordance, pinned to the card's top-right corner */
+      .row-arrow { position: absolute; top: 10px; right: 14px; width: auto; padding: 0; }
+      .customer-row td:first-child { padding-right: 24px; } /* don't run titles under the chevron */
+      .detail-row.open { display: block; } /* base .open rule says table-row; rows are blocks here */
+      .detail-row td { padding: 14px 12px; }
+      .detail-grid, .config-grid { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+
+      /* Modals: fit the viewport, scroll internally.
+         (Equal specificity with .modal-lg but later in source, so this intentionally wins on mobile.) */
+      .modal {
+        width: 100%;
+        max-width: calc(100vw - 24px);
+        padding: 20px;
+        max-height: calc(100dvh - 48px);
+        overflow-y: auto;
+      }
+      .cfg-grid { grid-template-columns: 1fr; }
+      .addon-row { grid-template-columns: 1fr 1fr auto; }
+      .addon-row .addon-name { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
@@ -322,12 +387,16 @@
 
 <!-- ===================== LOGIN ===================== -->
 <div id="login-screen">
-  <div class="login-card">
+  <!-- A real <form> (with a username field) so password managers recognize and autofill it.
+       onsubmit="return false" is a markup-level backstop: even if the main script block fails,
+       the browser must never natively POST the password to this URL. -->
+  <form class="login-card" id="login-form" method="post" action="" onsubmit="return false">
     <h2>Admin Login</h2>
-    <input type="password" id="password-input" placeholder="Admin password" autocomplete="current-password" />
+    <input type="text" name="username" autocomplete="username" value="admin" class="visually-hidden" tabindex="-1" aria-hidden="true" />
+    <input type="password" id="password-input" name="password" placeholder="Admin password" autocomplete="current-password" />
     <p class="login-error" id="login-error">Incorrect password</p>
-    <button class="btn btn-login" id="login-btn">Sign In</button>
-  </div>
+    <button class="btn btn-login" id="login-btn" type="submit">Sign In</button>
+  </form>
 </div>
 
 <!-- ===================== ADMIN ===================== -->
@@ -586,16 +655,17 @@ async function apiPost(body, endpoint) {
 // -----------------------------------------------------------------------
 // Login
 // -----------------------------------------------------------------------
-document.getElementById('login-btn').addEventListener('click', login);
-document.getElementById('password-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') login();
+document.getElementById('login-form').addEventListener('submit', e => {
+  e.preventDefault();
+  login();
 });
 
 async function login() {
+  const btn = document.getElementById('login-btn');
+  if (btn.disabled) return; // a login is already in flight
   const pw = document.getElementById('password-input').value;
   if (!pw) return;
 
-  const btn = document.getElementById('login-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-inline"></span>';
 
@@ -729,12 +799,12 @@ function renderTable() {
     return `
 <tr class="customer-row" data-index="${i}" onclick="toggleDetail(${i})">
   <td><strong>${escape(c.company_name)}</strong></td>
-  <td><code style="font-size:12px;color:var(--muted)">${escape(c.subdomain)}.treesnap.cloud</code></td>
-  <td>${tierLabel(c.tier)}</td>
-  <td>${statusBadge(c.status)}</td>
-  <td style="color:var(--muted)">${fmtDate(c.trial_end)}</td>
-  <td>${usageBar(c.estimates_this_month, c.monthly_limit)}</td>
-  <td style="color:var(--muted);font-size:18px;text-align:center;">›</td>
+  <td data-label="Subdomain"><code style="font-size:12px;color:var(--muted)">${escape(c.subdomain)}.treesnap.cloud</code></td>
+  <td data-label="Tier">${tierLabel(c.tier)}</td>
+  <td data-label="Status">${statusBadge(c.status)}</td>
+  <td data-label="Trial End" style="color:var(--muted)">${fmtDate(c.trial_end)}</td>
+  <td data-label="This Month">${usageBar(c.estimates_this_month, c.monthly_limit)}</td>
+  <td class="row-arrow" style="color:var(--muted);font-size:18px;text-align:center;">›</td>
 </tr>
 <tr class="detail-row" id="${detailId}">
   <td colspan="7">
@@ -1027,11 +1097,11 @@ function renderLeads() {
     <span style="color:var(--muted);font-size:12px;">${escape(l.email)}</span><br>
     <span style="color:var(--muted);font-size:12px;">${escape(l.phone)}</span>
   </td>
-  <td>${escape(l.company)}</td>
-  <td><code style="font-size:12px;color:var(--muted)">${escape(l.subdomain)}.treesnap.cloud</code></td>
-  <td>${TIER_LABELS[l.tier] || l.tier}</td>
-  <td><span class="badge badge-${escape(l.status)}">${escape(l.status)}</span></td>
-  <td style="color:var(--muted);font-size:12px;">${fmtDate(l.created_at)}</td>
+  <td data-label="Company">${escape(l.company)}</td>
+  <td data-label="Subdomain"><code style="font-size:12px;color:var(--muted)">${escape(l.subdomain)}.treesnap.cloud</code></td>
+  <td data-label="Tier">${TIER_LABELS[l.tier] || l.tier}</td>
+  <td data-label="Status"><span class="badge badge-${escape(l.status)}">${escape(l.status)}</span></td>
+  <td data-label="Submitted" style="color:var(--muted);font-size:12px;">${fmtDate(l.created_at)}</td>
   <td>
     <div style="display:flex;gap:6px;align-items:center;" id="lead-actions-${i}">
       ${actionsHtml}
