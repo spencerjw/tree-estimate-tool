@@ -152,6 +152,11 @@
     .badge-paused    { background: rgba(239,68,68,0.12);  color: #f87171; }
     .badge-canceled  { background: rgba(100,116,139,0.15); color: #94a3b8; }
 
+    /* ---- Customer domain links ---- */
+    .domain-link { text-decoration: none; }
+    .domain-link code { font-size: 12px; color: var(--green); }
+    .domain-link:hover code { text-decoration: underline; }
+
     /* ---- Tier badges ---- */
     .tier { color: var(--muted); font-size: 12px; }
     .tier-pro     { color: #a78bfa; }
@@ -631,6 +636,13 @@ function statusBadge(status) {
   return `<span class="badge badge-${escape(status)}">${escape(status)}</span>`;
 }
 
+// Clickable customer domain — used everywhere a subdomain is displayed.
+// stopPropagation: customer rows have onclick=toggleDetail, the link must not trigger it.
+function domainLink(subdomain) {
+  const dom = `${subdomain}.treesnap.cloud`;
+  return `<a class="domain-link" href="https://${escape(dom)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><code>${escape(dom)}</code></a>`;
+}
+
 function tierLabel(tier) {
   const map = { starter: 'Starter', pro: 'Pro', proplus: 'Pro+' };
   const cls  = tier === 'proplus' ? 'tier-proplus' : tier === 'pro' ? 'tier-pro' : '';
@@ -826,7 +838,7 @@ function renderTable() {
     return `
 <tr class="customer-row" data-index="${i}" onclick="toggleDetail(${i})">
   <td><strong>${escape(c.company_name)}</strong></td>
-  <td data-label="Subdomain"><code style="font-size:12px;color:var(--muted)">${escape(c.subdomain)}.treesnap.cloud</code></td>
+  <td data-label="Subdomain">${domainLink(c.subdomain)}</td>
   <td data-label="Tier">${tierLabel(c.tier)}</td>
   <td data-label="Status">${statusBadge(c.status)}</td>
   <td data-label="Trial End" style="color:var(--muted)">${fmtDate(c.trial_end)}</td>
@@ -1195,7 +1207,7 @@ function renderLeads() {
     <span style="color:var(--muted);font-size:12px;">${escape(l.phone)}</span>
   </td>
   <td data-label="Company">${escape(l.company)}</td>
-  <td data-label="Subdomain"><code style="font-size:12px;color:var(--muted)">${escape(l.subdomain)}.treesnap.cloud</code></td>
+  <td data-label="Subdomain">${domainLink(l.subdomain)}</td>
   <td data-label="Tier">${TIER_LABELS[l.tier] || l.tier}</td>
   <td data-label="Status"><span class="badge badge-${escape(l.status)}">${escape(l.status)}</span></td>
   <td data-label="Submitted" style="color:var(--muted);font-size:12px;">${fmtDate(l.created_at)}</td>
@@ -1295,7 +1307,17 @@ async function confirmReject() {
 function openDeleteModal(customerId, subdomain) {
   deleteCustomerId = customerId;
   deleteSubdomain  = subdomain;
-  document.getElementById('delete-subdomain-label').textContent = subdomain + '.treesnap.cloud';
+  // DOM-built clickable domain (subdomain originates from lead input — never innerHTML it)
+  const delLabel = document.getElementById('delete-subdomain-label');
+  delLabel.textContent = '';
+  const delLink = document.createElement('a');
+  delLink.href = `https://${subdomain}.treesnap.cloud`;
+  delLink.target = '_blank';
+  delLink.rel = 'noopener';
+  delLink.style.color = 'var(--text)';
+  delLink.style.textDecoration = 'underline';
+  delLink.textContent = subdomain + '.treesnap.cloud';
+  delLabel.appendChild(delLink);
   const input = document.getElementById('delete-confirm-input');
   input.value = '';
   input.placeholder = subdomain;
