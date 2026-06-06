@@ -93,16 +93,21 @@ ul { list-style: none; }
   padding: 14px 0;
 }
 
+/* Stacked + centered: company name on one line, tagline beneath it. Both are
+   tenant-configurable and can be long — a side-by-side row wraps lopsidedly. */
 .site-header .container {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  text-align: center;
+  gap: 4px;
 }
 
 .logo {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -120,7 +125,6 @@ ul { list-style: none; }
   font-weight: 500;
   font-family: var(--font-mono);
   letter-spacing: .4px;
-  margin-left: auto;
   text-transform: uppercase;
 }
 
