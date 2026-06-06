@@ -30,6 +30,8 @@
       --red:     #ef4444;
     }
 
+    html, body { overflow-x: hidden; }
+
     body {
       font-family: 'Geist', sans-serif;
       background: var(--bg);
@@ -239,6 +241,15 @@
       font-size: 13px !important;
     }
 
+    /* 16px inputs stop iOS Safari's focus auto-zoom (the page-pans-sideways bug).
+       pointer:coarse covers iPads/tablets — Safari zooms at any viewport width.
+       Must come after the base input rules above to win the cascade. */
+    @media (max-width: 540px), (pointer: coarse) {
+      input[type="text"], input[type="tel"], input[type="number"],
+      select, textarea, .zip-text-input { font-size: 16px; }
+      .addon-price-input { font-size: 16px !important; }
+    }
+
     /* ---- Theme swatches ---- */
     .theme-grid {
       display: grid;
@@ -355,7 +366,7 @@
         <div class="field field-row single">
           <label>Service Area Zip Codes</label>
           <div class="zip-input-wrap" id="zip-wrap" onclick="document.getElementById('zip-text').focus()">
-            <input type="text" id="zip-text" class="zip-text-input" placeholder="Type a zip and press Enter…" autocomplete="off" />
+            <input type="text" id="zip-text" class="zip-text-input" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done" placeholder="Type a 5-digit zip…" autocomplete="off" />
           </div>
           <span class="field-note">Leave blank to serve all areas.</span>
         </div>
@@ -370,14 +381,14 @@
             <label for="removal_low">Tree Removal — Low end</label>
             <div class="input-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="removal_low" name="removal_low" class="has-prefix" placeholder="800" min="0" required />
+              <input type="number" id="removal_low" name="removal_low" class="has-prefix" inputmode="numeric" placeholder="800" min="0" required />
             </div>
           </div>
           <div class="field">
             <label for="removal_high">Tree Removal — High end</label>
             <div class="input-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="removal_high" name="removal_high" class="has-prefix" placeholder="2500" min="0" required />
+              <input type="number" id="removal_high" name="removal_high" class="has-prefix" inputmode="numeric" placeholder="2500" min="0" required />
             </div>
           </div>
         </div>
@@ -386,14 +397,14 @@
             <label for="trimming_low">Trimming/Pruning — Low end</label>
             <div class="input-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="trimming_low" name="trimming_low" class="has-prefix" placeholder="300" min="0" required />
+              <input type="number" id="trimming_low" name="trimming_low" class="has-prefix" inputmode="numeric" placeholder="300" min="0" required />
             </div>
           </div>
           <div class="field">
             <label for="trimming_high">Trimming/Pruning — High end</label>
             <div class="input-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="trimming_high" name="trimming_high" class="has-prefix" placeholder="900" min="0" required />
+              <input type="number" id="trimming_high" name="trimming_high" class="has-prefix" inputmode="numeric" placeholder="900" min="0" required />
             </div>
           </div>
         </div>
@@ -402,7 +413,7 @@
             <label for="minimum_job">Minimum Job Size</label>
             <div class="input-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="minimum_job" name="minimum_job" class="has-prefix" placeholder="350" min="0" />
+              <input type="number" id="minimum_job" name="minimum_job" class="has-prefix" inputmode="numeric" placeholder="350" min="0" />
             </div>
             <span class="field-note">Estimates below this will be bumped up.</span>
           </div>
@@ -553,6 +564,17 @@ function setupZipInput() {
     }
   });
 
+  // Mobile numeric keyboards have no comma (and sometimes no Enter) key —
+  // auto-commit each zip as soon as 5 digits are typed.
+  input.addEventListener('input', () => {
+    let digits = input.value.replace(/\D/g, '');
+    while (digits.length >= 5) {
+      addZip(digits.slice(0, 5));
+      digits = digits.slice(5);
+    }
+    if (input.value !== digits) input.value = digits;
+  });
+
   input.addEventListener('blur', () => {
     const val = input.value.trim().replace(/,$/, '');
     if (val) { addZip(val); input.value = ''; }
@@ -561,8 +583,8 @@ function setupZipInput() {
 
 function addZip(zip) {
   if (!zip) return;
-  // Accept 5-digit zips or reasonable variants
-  if (!/^\d{4,10}$/.test(zip.replace(/\s/g, ''))) return;
+  // US zips only — exactly 5 digits (keeps blur/Enter from saving leftover fragments)
+  if (!/^\d{5}$/.test(zip.replace(/\s/g, ''))) return;
   zip = zip.replace(/\s/g, '');
   if (zipCodes.includes(zip)) return;
   zipCodes.push(zip);
@@ -610,7 +632,7 @@ function renderAddons() {
       <div class="input-wrap">
         <span class="input-prefix">$</span>
         <input type="number" id="${id}-low" class="has-prefix addon-price-input"
-               value="${addon.low}" min="0"
+               inputmode="numeric" value="${addon.low}" min="0"
                onclick="event.stopPropagation()"
                oninput="updateAddonPrice('${id}','${escAttr(addon.name)}')" />
       </div>
@@ -620,7 +642,7 @@ function renderAddons() {
       <div class="input-wrap">
         <span class="input-prefix">$</span>
         <input type="number" id="${id}-high" class="has-prefix addon-price-input"
-               value="${addon.high}" min="0"
+               inputmode="numeric" value="${addon.high}" min="0"
                onclick="event.stopPropagation()"
                oninput="updateAddonPrice('${id}','${escAttr(addon.name)}')" />
       </div>
