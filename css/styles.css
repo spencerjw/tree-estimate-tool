@@ -318,6 +318,7 @@ input.invalid {
 .service-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr; /* all four cards equal height, even when one label wraps */
   gap: 10px;
 }
 
@@ -325,7 +326,10 @@ input.invalid {
   .service-grid { grid-template-columns: 1fr; }
 }
 
-.service-option { cursor: pointer; }
+/* Flex so the card fills the label — grid equalizes label heights per row, and the
+   card must follow, else a wrapped label ("Trimming / Pruning" on phones) leaves
+   neighboring cards with misaligned bottoms. */
+.service-option { cursor: pointer; display: flex; }
 
 .service-option input[type="radio"] {
   position: absolute;
@@ -336,8 +340,10 @@ input.invalid {
 
 .service-card {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 14px 10px;
   border: 1px solid var(--border-strong);
