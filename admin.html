@@ -324,14 +324,17 @@
     .addon-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 8px; }
     .cfg-error { color: var(--red); font-size: 13px; display: none; }
 
+    /* ≥16px inputs prevent iOS focus auto-zoom everywhere. pointer:coarse covers
+       iPads/tablets wider than the 720px layout breakpoint — Safari zooms at any width.
+       !important is load-bearing: it must outrank .cfg-field input (14px) and .addon-row input (13px). */
+    @media (max-width: 720px), (pointer: coarse) {
+      input, select, textarea { font-size: 16px !important; }
+    }
+
     /* ================= Mobile (≤720px) ================= */
     @media (max-width: 720px) {
       #admin-screen { padding: 12px; }
       .admin-header { padding: 0 16px; }
-
-      /* ≥16px inputs prevent iOS focus auto-zoom everywhere.
-         !important is load-bearing: it must outrank .cfg-field input (14px) and .addon-row input (13px). */
-      input, select, textarea { font-size: 16px !important; }
 
       /* Stats: 2-up grid instead of a single overflow row */
       .stats-row { display: grid; grid-template-columns: 1fr 1fr; }
@@ -464,7 +467,7 @@
     <p style="color:var(--muted);font-size:13px;">Current trial end: <strong id="extend-current-end" style="color:var(--text)"></strong></p>
     <div style="display:flex;flex-direction:column;gap:6px;">
       <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Extend by (days)</label>
-      <input type="number" id="extend-days" value="14" min="1" max="90"
+      <input type="number" id="extend-days" inputmode="numeric" value="14" min="1" max="90"
              style="padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;font-family:inherit;width:100%;" />
     </div>
     <div class="modal-actions">
@@ -484,19 +487,19 @@
         <div class="cfg-section-title">Business</div>
         <div class="cfg-grid">
           <div class="cfg-field"><label>Business Name</label><input type="text" id="cfg-business_name" /></div>
-          <div class="cfg-field"><label>Phone</label><input type="text" id="cfg-phone" /></div>
+          <div class="cfg-field"><label>Phone</label><input type="text" id="cfg-phone" inputmode="tel" /></div>
           <div class="cfg-field full"><label>Email (login + billing + notifications)</label><input type="email" id="cfg-email" autocomplete="off" /></div>
         </div>
       </div>
       <div>
         <div class="cfg-section-title">Pricing</div>
         <div class="cfg-grid">
-          <div class="cfg-field"><label>Tree Removal — Low ($)</label><input type="number" id="cfg-removal_low" min="0" /></div>
-          <div class="cfg-field"><label>Tree Removal — High ($)</label><input type="number" id="cfg-removal_high" min="0" /></div>
-          <div class="cfg-field"><label>Trimming — Low ($)</label><input type="number" id="cfg-trimming_low" min="0" /></div>
-          <div class="cfg-field"><label>Trimming — High ($)</label><input type="number" id="cfg-trimming_high" min="0" /></div>
-          <div class="cfg-field"><label>Minimum Job ($)</label><input type="number" id="cfg-minimum_job" min="0" /></div>
-          <div class="cfg-field"><label>Emergency Multiplier (×)</label><input type="number" id="cfg-emergency_multiplier" min="0" step="0.1" /></div>
+          <div class="cfg-field"><label>Tree Removal — Low ($)</label><input type="number" id="cfg-removal_low" inputmode="numeric" min="0" /></div>
+          <div class="cfg-field"><label>Tree Removal — High ($)</label><input type="number" id="cfg-removal_high" inputmode="numeric" min="0" /></div>
+          <div class="cfg-field"><label>Trimming — Low ($)</label><input type="number" id="cfg-trimming_low" inputmode="numeric" min="0" /></div>
+          <div class="cfg-field"><label>Trimming — High ($)</label><input type="number" id="cfg-trimming_high" inputmode="numeric" min="0" /></div>
+          <div class="cfg-field"><label>Minimum Job ($)</label><input type="number" id="cfg-minimum_job" inputmode="numeric" min="0" /></div>
+          <div class="cfg-field"><label>Emergency Multiplier (×)</label><input type="number" id="cfg-emergency_multiplier" inputmode="decimal" min="0" step="0.1" /></div>
         </div>
       </div>
       <div>
@@ -981,9 +984,9 @@ function addAddonRow(name = '', low = '', high = '') {
   const nameI = document.createElement('input');
   nameI.type = 'text'; nameI.placeholder = 'Add-on name'; nameI.className = 'addon-name'; nameI.value = name;
   const lowI = document.createElement('input');
-  lowI.type = 'number'; lowI.placeholder = 'Low $'; lowI.min = '0'; lowI.className = 'addon-low'; lowI.value = low;
+  lowI.type = 'number'; lowI.inputMode = 'numeric'; lowI.placeholder = 'Low $'; lowI.min = '0'; lowI.className = 'addon-low'; lowI.value = low;
   const highI = document.createElement('input');
-  highI.type = 'number'; highI.placeholder = 'High $'; highI.min = '0'; highI.className = 'addon-high'; highI.value = high;
+  highI.type = 'number'; highI.inputMode = 'numeric'; highI.placeholder = 'High $'; highI.min = '0'; highI.className = 'addon-high'; highI.value = high;
   const rm = document.createElement('button');
   rm.type = 'button'; rm.className = 'addon-remove'; rm.title = 'Remove'; rm.textContent = '×';
   rm.onclick = () => row.remove();
