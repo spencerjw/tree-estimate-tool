@@ -585,7 +585,7 @@
     <h3 style="color:var(--red)">Delete Customer</h3>
     <p style="color:var(--muted);font-size:13px;">Permanently deletes <strong id="delete-subdomain-label" style="color:var(--text)"></strong> and tears down its Stripe subscription, DNS record, Vercel domain, and all data (config, estimates, usage, email log). <strong style="color:var(--red)">This cannot be undone.</strong></p>
     <p style="color:var(--muted);font-size:13px;">Type the subdomain to confirm:</p>
-    <input type="text" id="delete-confirm-input" autocomplete="off" oninput="onDeleteInput()" placeholder=""
+    <input type="text" id="delete-confirm-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" oninput="onDeleteInput()" placeholder=""
            style="padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;font-family:inherit;width:100%;" />
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeDeleteModal()">Cancel</button>
@@ -1333,7 +1333,9 @@ function closeDeleteModal() {
 
 function onDeleteInput() {
   const val = document.getElementById('delete-confirm-input').value.trim();
-  document.getElementById('delete-confirm-btn').disabled = (val !== deleteSubdomain);
+  // Case-insensitive: subdomains are provisioned strictly lowercase, and mobile
+  // keyboards that ignore autocapitalize="none" still auto-capitalize the first letter.
+  document.getElementById('delete-confirm-btn').disabled = (val.toLowerCase() !== String(deleteSubdomain).toLowerCase());
 }
 
 async function confirmDelete() {
