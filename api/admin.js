@@ -3,7 +3,7 @@
 
 import { supabase } from '../lib/supabase.js';
 import {
-  approveLead, rejectLead, resendOnboarding,
+  approveLead, rejectLead, resendOnboarding, deleteLead,
   upgradeCustomer, extendTrial, togglePause, editConfig, deleteCustomer,
 } from '../lib/admin-actions.js';
 
@@ -14,6 +14,7 @@ const POST_ACTIONS = {
   'approve':      approveLead,
   'reject':       rejectLead,
   'resend':       resendOnboarding,
+  'delete-lead':  deleteLead,
   'upgrade':      upgradeCustomer,
   'extend-trial': extendTrial,
   'toggle-pause': togglePause,

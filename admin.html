@@ -1082,13 +1082,18 @@ function renderLeads() {
   tbody.innerHTML = leadsData.map((l, i) => {
     const isPending  = l.status === 'pending';
     const isApproved = l.status === 'approved';
+    // Provisioned leads belong to a live customer — no delete here (Delete the customer instead).
+    const deleteBtn = l.status === 'provisioned' ? '' :
+      `<button class="btn btn-danger btn-sm" onclick="deleteLead('${escape(l.id)}',${i})" title="Permanently delete — no email is sent">Delete</button>`;
     const actionsHtml = isPending
       ? `<button class="btn btn-primary" onclick="approveLead('${escape(l.id)}',${i})">Approve</button>
-         <button class="btn btn-danger"  onclick="openRejectModal('${escape(l.id)}')">Reject</button>`
+         <button class="btn btn-danger"  onclick="openRejectModal('${escape(l.id)}')">Reject</button>
+         ${deleteBtn}`
       : isApproved
       ? `<button class="btn btn-outline" onclick="resendOnboarding('${escape(l.id)}',${i})">Resend link</button>
-         <span style="color:var(--muted);font-size:12px;">approved</span>`
-      : `<span style="color:var(--muted);font-size:12px;">${escape(l.status)}</span>`;
+         ${deleteBtn}`
+      : `<span style="color:var(--muted);font-size:12px;">${escape(l.status)}</span>
+         ${deleteBtn}`;
 
     return `
 <tr>
@@ -1103,7 +1108,7 @@ function renderLeads() {
   <td data-label="Status"><span class="badge badge-${escape(l.status)}">${escape(l.status)}</span></td>
   <td data-label="Submitted" style="color:var(--muted);font-size:12px;">${fmtDate(l.created_at)}</td>
   <td>
-    <div style="display:flex;gap:6px;align-items:center;" id="lead-actions-${i}">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;" id="lead-actions-${i}">
       ${actionsHtml}
       <span class="action-feedback" id="lead-feedback-${i}" style="display:none"></span>
       <span class="action-error"    id="lead-error-${i}"    style="display:none"></span>
@@ -1141,6 +1146,24 @@ async function resendOnboarding(leadId, i) {
     const fb = document.getElementById(`lead-feedback-${i}`);
     if (fb) { fb.textContent = 'New setup link sent'; fb.style.display = 'inline'; }
     setTimeout(() => renderLeads(), 1500);
+  } catch (err) {
+    const eb = document.getElementById(`lead-error-${i}`);
+    if (eb) { eb.textContent = err.message; eb.style.display = 'inline'; }
+    btns?.forEach(b => b.disabled = false);
+  }
+}
+
+async function deleteLead(leadId, i) {
+  if (!confirm('Permanently delete this lead? No email will be sent and this cannot be undone.')) return;
+  const container = document.getElementById(`lead-actions-${i}`);
+  const btns = container?.querySelectorAll('.btn');
+  btns?.forEach(b => b.disabled = true);
+
+  try {
+    await apiPost({ action: 'delete-lead', leadId });
+    leadsData = leadsData.filter(l => l.id !== leadId);
+    renderLeads();
+    renderStats(); // pending-lead count + tab badge may have changed
   } catch (err) {
     const eb = document.getElementById(`lead-error-${i}`);
     if (eb) { eb.textContent = err.message; eb.style.display = 'inline'; }
