@@ -126,6 +126,9 @@ export default async function handler(req, res) {
           status,
           current_period_start: toIso(sub.current_period_start),
           current_period_end:   toIso(sub.current_period_end),
+          // Stamp on cancel, clear on any other status so a reactivated tenant
+          // isn't purged by the 90-day cleanup cron.
+          canceled_at: status === 'canceled' ? new Date().toISOString() : null,
         };
         if (tier) updates.tier = tier;
 
@@ -145,7 +148,7 @@ export default async function handler(req, res) {
 
         await supabase
           .from('customers')
-          .update({ status: 'canceled', current_period_end: periodEnd })
+          .update({ status: 'canceled', current_period_end: periodEnd, canceled_at: new Date().toISOString() })
           .eq('stripe_customer_id', sub.customer);
 
         const customer = await getCustomerByStripeId(sub.customer);
@@ -175,7 +178,7 @@ export default async function handler(req, res) {
 
         await supabase
           .from('customers')
-          .update({ status: 'active', current_period_start: periodStart, current_period_end: periodEnd })
+          .update({ status: 'active', current_period_start: periodStart, current_period_end: periodEnd, canceled_at: null })
           .eq('id', customer.id);
 
         // Only send "subscription started" email for the first charge (trial → paid conversion)
