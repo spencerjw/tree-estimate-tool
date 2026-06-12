@@ -15,6 +15,11 @@ create table if not exists rate_limits (
 
 create index if not exists idx_rate_limits_window_start on rate_limits(window_start);
 
+-- Backend-only, same posture as every other table: RLS on with no policies denies
+-- anon/authenticated via PostgREST, while the service-role key and the SECURITY
+-- DEFINER function below bypass it.
+alter table rate_limits enable row level security;
+
 -- Atomic check-and-increment. Buckets now() into fixed windows of p_window_seconds,
 -- upserts the counter, and returns the post-increment count + whether it's allowed.
 -- The single upsert is race-safe under concurrent serverless invocations.
