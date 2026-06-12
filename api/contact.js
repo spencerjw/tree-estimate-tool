@@ -3,6 +3,7 @@
 
 import { supabase } from '../lib/supabase.js';
 import { sendLeadAcknowledgmentEmail, sendLeadNotificationToAdmin } from '../lib/emails.js';
+import { rateLimit, clientIp } from '../lib/rate-limit.js';
 
 const SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 
@@ -13,6 +14,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
+
+  // Throttle per IP — each submission writes a lead and sends two emails.
+  const rl = await rateLimit({ bucket: 'contact', identifier: clientIp(req), windowSeconds: 3600, max: 5 });
+  if (!rl.allowed) {
+    return res.status(429).json({ error: 'Too many submissions. Please try again later.' });
+  }
 
   const { name, email, phone, company, subdomain, tier, zip } = req.body ?? {};
 

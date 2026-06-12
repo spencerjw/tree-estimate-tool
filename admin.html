@@ -674,7 +674,11 @@ function monthKey() {
 // API calls
 // -----------------------------------------------------------------------
 async function apiGet() {
-  const resp = await fetch(`/api/admin?password=${encodeURIComponent(adminPassword)}`);
+  // Auth via Authorization header, not a ?password= query param (which would be
+  // logged by Vercel/CDN and saved in browser history).
+  const resp = await fetch('/api/admin', {
+    headers: { Authorization: `Bearer ${adminPassword}` },
+  });
   if (resp.status === 401) throw new Error('unauthorized');
   if (!resp.ok) throw new Error('API error');
   return resp.json();
@@ -684,8 +688,8 @@ async function apiPost(body, endpoint) {
   const url  = endpoint || '/api/admin';
   const resp = await fetch(url, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ...body, password: adminPassword }),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminPassword}` },
+    body:    JSON.stringify(body),
   });
   if (resp.status === 401) throw new Error('unauthorized');
   if (!resp.ok) {

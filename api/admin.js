@@ -1,6 +1,7 @@
 // Admin API — password-protected endpoint for the TreeSnap admin panel.
 // All actions require ADMIN_PASSWORD in the request body or query string.
 
+import { timingSafeEqual } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import {
   approveLead, rejectLead, resendOnboarding, deleteLead,
@@ -22,13 +23,25 @@ const POST_ACTIONS = {
   'delete':       deleteCustomer,
 };
 
+// Constant-time compare so a wrong password can't be recovered by timing.
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a ?? ''));
+  const bb = Buffer.from(String(b ?? ''));
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 function checkPassword(req) {
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (!adminPassword) return false;
-  const provided = req.method === 'GET'
-    ? req.query?.password
-    : req.body?.password;
-  return provided === adminPassword;
+  // Read the secret from the Authorization header, never the query string —
+  // query params land in Vercel/CDN access logs and browser history. POST body
+  // is kept as a fallback (request bodies aren't logged in URLs).
+  const header = req.headers.authorization || '';
+  const provided = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : (req.method === 'POST' ? (req.body?.password ?? '') : '');
+  return provided.length > 0 && safeEqual(provided, adminPassword);
 }
 
 export default async function handler(req, res) {

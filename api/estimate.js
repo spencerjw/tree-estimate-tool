@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { sendLeadNotificationEmail, sendHomeownerEstimateEmail } from '../lib/emails.js';
+import { rateLimit, clientIp } from '../lib/rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // Tier limits (estimates per month)
@@ -281,6 +282,23 @@ export default async function handler(req, res) {
   const host = req.headers.host ?? '';
   const isDemo = isDemoHost(host);
   const estimateId = randomUUID();
+
+  // -------------------------------------------------------------------------
+  // 0. Rate limit (before any paid Claude calls). Each estimate = 2 vision
+  //    calls. Per-IP cap on all paths; a stricter daily cap on the demo/preview
+  //    path, which has no tier limit and would otherwise be free unlimited AI.
+  // -------------------------------------------------------------------------
+  const ip = clientIp(req);
+  const burst = await rateLimit({ bucket: 'estimate', identifier: ip, windowSeconds: 600, max: 10 });
+  if (!burst.allowed) {
+    return res.status(429).json({ error: 'Too many requests. Please wait a few minutes and try again.' });
+  }
+  if (isDemo) {
+    const demoDaily = await rateLimit({ bucket: 'estimate_demo', identifier: ip, windowSeconds: 86400, max: 20 });
+    if (!demoDaily.allowed) {
+      return res.status(429).json({ error: 'Demo limit reached for today. Please try again tomorrow.' });
+    }
+  }
 
   // -------------------------------------------------------------------------
   // 1. Load customer config
