@@ -2,8 +2,8 @@
 // GET  /api/onboarding?token=<token>  → prefill fields for the form
 // POST /api/onboarding                → save config, create Stripe checkout, return URL
 
-import Stripe from 'stripe';
 import { supabase } from '../lib/supabase.js';
+import { getStripe } from '../lib/stripe.js';
 import { findOrCreateStripeCustomer } from '../lib/provision.js';
 
 const SETUP_PRICE_IDS = {
@@ -132,7 +132,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const stripe  = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const stripe  = getStripe();
     const appUrl  = process.env.APP_URL ?? 'https://app.treesnap.cloud';
 
     // Create (or reuse) the Stripe customer up front and bill the setup fee to it,

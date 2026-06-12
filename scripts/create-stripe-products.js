@@ -2,9 +2,9 @@
 // Usage: STRIPE_SECRET_KEY=sk_live_... node scripts/create-stripe-products.js
 // Copy the printed env var lines to your Vercel dashboard.
 
-import Stripe from 'stripe';
+import { getStripe } from '../lib/stripe.js';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = getStripe();
 
 const PRODUCTS = [
   { name: 'TreeSnap Starter Setup',        envKey: 'STRIPE_SETUP_PRICE_STARTER',            amount: 29900 },

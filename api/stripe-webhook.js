@@ -1,8 +1,8 @@
 // Stripe webhook handler — verifies signature and processes subscription lifecycle events.
 // Requires bodyParser disabled so we can verify the raw request body.
 
-import Stripe from 'stripe';
 import { supabase } from '../lib/supabase.js';
+import { getStripe } from '../lib/stripe.js';
 import { provisionCustomer } from '../lib/provision.js';
 import {
   sendTrialEndingEmail,
@@ -48,6 +48,23 @@ function toIso(unixSeconds) {
   return unixSeconds ? new Date(unixSeconds * 1000).toISOString() : null;
 }
 
+// Billing-period fields moved from the subscription root onto its items in
+// Stripe's Basil API version (2025-03-31+); invoice.subscription moved under
+// invoice.parent. Webhook event payloads are versioned by the endpoint's
+// dashboard setting (not the SDK pin), so read from either location.
+function subPeriodStart(sub) {
+  return sub?.current_period_start ?? sub?.items?.data?.[0]?.current_period_start ?? null;
+}
+function subPeriodEnd(sub) {
+  return sub?.current_period_end ?? sub?.items?.data?.[0]?.current_period_end ?? null;
+}
+function invoiceSubscriptionId(invoice) {
+  return invoice?.subscription
+    ?? invoice?.parent?.subscription_details?.subscription
+    ?? invoice?.lines?.data?.[0]?.subscription
+    ?? null;
+}
+
 async function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -83,7 +100,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Stripe not configured' });
   }
 
-  const stripe = new Stripe(stripeKey);
+  const stripe = getStripe(stripeKey);
   const rawBody = await getRawBody(req);
   const sig = req.headers['stripe-signature'];
 
@@ -124,8 +141,8 @@ export default async function handler(req, res) {
 
         const updates = {
           status,
-          current_period_start: toIso(sub.current_period_start),
-          current_period_end:   toIso(sub.current_period_end),
+          current_period_start: toIso(subPeriodStart(sub)),
+          current_period_end:   toIso(subPeriodEnd(sub)),
           // Stamp on cancel, clear on any other status so a reactivated tenant
           // isn't purged by the 90-day cleanup cron.
           canceled_at: status === 'canceled' ? new Date().toISOString() : null,
@@ -144,7 +161,7 @@ export default async function handler(req, res) {
       // ----------------------------------------------------------------------
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
-        const periodEnd = toIso(sub.current_period_end);
+        const periodEnd = toIso(subPeriodEnd(sub));
 
         await supabase
           .from('customers')
@@ -170,10 +187,11 @@ export default async function handler(req, res) {
         let periodStart = null;
         let periodEnd = null;
 
-        if (invoice.subscription) {
-          const sub = await stripe.subscriptions.retrieve(invoice.subscription);
-          periodStart = toIso(sub.current_period_start);
-          periodEnd   = toIso(sub.current_period_end);
+        const invSubId = invoiceSubscriptionId(invoice);
+        if (invSubId) {
+          const sub = await stripe.subscriptions.retrieve(invSubId);
+          periodStart = toIso(subPeriodStart(sub));
+          periodEnd   = toIso(subPeriodEnd(sub));
         }
 
         await supabase
