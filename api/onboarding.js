@@ -4,6 +4,7 @@
 
 import Stripe from 'stripe';
 import { supabase } from '../lib/supabase.js';
+import { findOrCreateStripeCustomer } from '../lib/provision.js';
 
 const SETUP_PRICE_IDS = {
   starter: process.env.STRIPE_PRICE_SETUP_STARTER,
@@ -134,11 +135,24 @@ export default async function handler(req, res) {
     const stripe  = new Stripe(process.env.STRIPE_SECRET_KEY);
     const appUrl  = process.env.APP_URL ?? 'https://app.treesnap.cloud';
 
+    // Create (or reuse) the Stripe customer up front and bill the setup fee to it,
+    // so the card is saved to THIS customer (setup_future_usage). provision.js
+    // creates the monthly subscription on the same customer after payment, and the
+    // 14-day trial auto-charges that saved card off-session when it ends. Uses the
+    // same idempotency key as provision.js, so the customer is never duplicated.
+    const stripeCustomer = await findOrCreateStripeCustomer(stripe, lead);
+    await supabase.from('leads').update({ stripe_customer_id: stripeCustomer.id }).eq('id', lead.id);
+
     const session = await stripe.checkout.sessions.create({
       mode:                  'payment',
       line_items:            [{ price: priceId, quantity: 1 }],
-      customer_email:        lead.email,
+      customer:              stripeCustomer.id,
       allow_promotion_codes: true,  // lets a customer enter a promo/discount code (e.g. a 100%-off test code)
+      // Save the card to the customer for the off-session subscription charge at
+      // trial end. NOTE: a 100%-off promo zeroes the setup PaymentIntent, in which
+      // case Checkout collects no card and nothing is saved — fine for test coupons
+      // (real setup fees are non-zero), but don't rely on it for live $0 sessions.
+      payment_intent_data:   { setup_future_usage: 'off_session' },
       metadata:              { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
       success_url:           `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:            `${appUrl}/onboard?token=${token}`,

@@ -282,6 +282,23 @@ export default async function handler(req, res) {
             break;
           }
 
+          // Persist the setup-fee card as the customer's default payment method so
+          // the monthly subscription (created in provisionCustomer) auto-charges it
+          // off-session when the 14-day trial ends. Best-effort: if it fails the
+          // trial still starts; the trial-ending email is the safety net.
+          try {
+            if (session.customer && session.payment_intent) {
+              const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
+              if (pi.payment_method) {
+                await stripe.customers.update(session.customer, {
+                  invoice_settings: { default_payment_method: pi.payment_method },
+                });
+              }
+            }
+          } catch (e) {
+            console.error('Failed to set default payment method from setup checkout:', e.message);
+          }
+
           await provisionCustomer(lead);
           console.log(`Provisioned customer for lead ${lead_id}`);
         }
