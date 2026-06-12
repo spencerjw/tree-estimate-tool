@@ -96,6 +96,19 @@ export default async function handler(req, res) {
     canceledEstimatesDeleted = deletedCanceled?.length ?? 0;
   }
 
-  console.log(`Cleanup: ${photosDeleted} photos deleted from storage, ${demoDeleted} demo estimates removed, ${canceledEstimatesDeleted} estimates purged for canceled tenants`);
-  return res.status(200).json({ photosDeleted, demoDeleted, canceledEstimatesDeleted });
+  // 4. Sweep expired rate-limit windows (older than 2 days). Tolerates the table
+  //    not existing until migration 008 is applied; the index makes this cheap.
+  let rateLimitsSwept = false;
+  const { error: rlErr } = await supabase
+    .from('rate_limits')
+    .delete()
+    .lt('window_start', new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
+  if (rlErr) {
+    console.error('Rate-limit cleanup error:', rlErr.message);
+  } else {
+    rateLimitsSwept = true;
+  }
+
+  console.log(`Cleanup: ${photosDeleted} photos deleted from storage, ${demoDeleted} demo estimates removed, ${canceledEstimatesDeleted} estimates purged for canceled tenants, rate-limit sweep ${rateLimitsSwept ? 'ok' : 'skipped'}`);
+  return res.status(200).json({ photosDeleted, demoDeleted, canceledEstimatesDeleted, rateLimitsSwept });
 }
