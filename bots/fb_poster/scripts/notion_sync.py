@@ -143,6 +143,15 @@ def update_row(page_id, props):
     return True
 
 
+def create_row(props):
+    body = {"parent": {"type": "data_source_id", "data_source_id": NOTION_DS}, "properties": props}
+    r = requests.post("https://api.notion.com/v1/pages", headers=JSON_HEADERS, json=body, timeout=30)
+    if r.status_code not in (200, 201):
+        print(f"    create failed: {r.status_code} {r.text[:160]}")
+        return False
+    return True
+
+
 def main():
     queue_data = load_json(QUEUE_FILE, {})
     queue = queue_data.get("queue", [])
@@ -160,21 +169,15 @@ def main():
     now = dt.datetime.now(dt.timezone.utc)
     slots = iter_slots(now)
 
-    matched = unmatched = uploaded = 0
+    matched = created = uploaded = 0
     for post in queue:
         title = (post.get("title") or "").strip()
         key = normalize(title)
         page = norm_rows.get(key)
         if page is None:  # fall back to prefix match
             page = next((pg for nm, pg in norm_rows.items() if nm.startswith(key[:40]) or key.startswith(nm[:40])), None)
-        if page is None:
-            print(f"  ! no Notion row for post {post.get('id')}: {title[:50]!r}")
-            unmatched += 1
-            continue
-        matched += 1
-        page_id = page["id"]
-        props = {}
 
+        props = {}
         # Status + Publish Date
         if post["id"] in posted_ids:
             props["Status"] = {"select": {"name": STATUS_POSTED}}
@@ -191,7 +194,7 @@ def main():
 
         # Image thumbnail (upload once)
         img = post.get("image_path")
-        if has_image(post) and not row_has_file(page, img):
+        if has_image(post) and (page is None or not row_has_file(page, img)):
             try:
                 fid = upload_image(os.path.join(ASSETS_DIR, img), img)
                 props["Files & media"] = {"files": [{"type": "file_upload", "file_upload": {"id": fid}, "name": img}]}
@@ -199,16 +202,24 @@ def main():
             except Exception as e:
                 print(f"    image upload failed for post {post['id']}: {e}")
 
-        ok = update_row(page_id, props)
+        if page is not None:
+            matched += 1
+            action = "upd"
+            ok = update_row(page["id"], props)
+        else:
+            created += 1
+            action = "NEW"
+            props["Name"] = {"title": [{"text": {"content": title}}]}
+            props["Content Preview"] = {"rich_text": [{"text": {"content": (post.get("content") or "")[:1900]}}]}
+            props["Domain"] = {"select": {"name": "TreeSnap"}}
+            ok = create_row(props)
+
         status = props["Status"]["select"]["name"]
         date = props.get("Publish Date", {}).get("date")
         date_s = (date or {}).get("start", "—") if date else "—"
-        print(f"  post {post['id']:>3} [{post.get('pillar','')[:12]:12}] {status:12} {date_s}{'  +img' if 'Files & media' in props else ''}{'' if ok else '  (FAILED)'}")
+        print(f"  [{action}] post {post['id']:>3} [{post.get('pillar','')[:12]:12}] {status:12} {date_s}{'  +img' if 'Files & media' in props else ''}{'' if ok else '  (FAILED)'}")
 
-    print(f"\nDone: {matched} matched, {unmatched} unmatched, {uploaded} images uploaded.")
-    if unmatched:
-        print(f"WARNING: {unmatched} queued post(s) had no matching Notion row (listed above) — "
-              f"create/rename those rows so they appear in the calendar.")
+    print(f"\nDone: {matched} updated, {created} created, {uploaded} images uploaded.")
 
 
 if __name__ == "__main__":
