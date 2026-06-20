@@ -20,8 +20,11 @@ back to the Notion content calendar, appends to `state/fb_post_log.json`, and co
 the updated queue + log back to the repo. When the queue is exhausted it auto-resets
 and rotates from the top.
 
-Each post entry carries its own `image_path` (a bare filename in `assets/`). If an
-image is missing, the post goes out text-only rather than failing.
+Each post entry carries its own `image_path` (a bare filename in `assets/`).
+**HARD RULE: nothing is ever posted without an image.** A post whose `image_path`
+is null or whose image file is missing from `assets/` is **skipped** (left in the
+queue, never posted text-only). If no queued post has a usable image, the run
+exits with an error rather than posting anything imageless.
 
 ## Required GitHub Secrets
 
@@ -51,7 +54,7 @@ bots/fb_poster/
 ## Manual operations
 
 - **Trigger a one-off post:** workflow_dispatch on `fb-post.yml`.
-- **Add posts to the queue:** edit `config/fb_post_queue.json` (`queue` array; `posted` is auto-managed). Set each post's `image_path` to a filename present in `assets/`, or `null` for text-only.
+- **Add posts to the queue:** edit `config/fb_post_queue.json` (`queue` array; `posted` is auto-managed). Each post's `image_path` MUST be a filename present in `assets/` — posts without a usable image are skipped, never posted.
 - **See post history:** `state/fb_post_log.json` or `git log` filtered by the `bot(fb):` prefix.
 
 ## Token note

@@ -113,44 +113,48 @@ def main():
     queue = queue_data["queue"]
     posted_ids = set(queue_data.get("posted", []))
 
-    next_post = next((p for p in queue if p["id"] not in posted_ids), None)
+    def has_image(p):
+        name = p.get("image_path")
+        return bool(name) and os.path.exists(os.path.join(ASSETS_DIR, name))
+
+    # HARD RULE: never post without an image. Only ever select a post whose image
+    # actually exists in assets/. Imageless rows (or rows with a missing image file)
+    # are skipped and left in the queue — they are NEVER posted text-only.
+    skipped = [p["id"] for p in queue if p["id"] not in posted_ids and not has_image(p)]
+    if skipped:
+        print(f"  Skipping imageless posts (no-image rule): {skipped}")
+
+    next_post = next((p for p in queue if p["id"] not in posted_ids and has_image(p)), None)
     if next_post is None:
-        print("All posts cycled - resetting queue.")
+        print("All image-bearing posts cycled - resetting queue.")
         queue_data["posted"] = []
-        save_json(QUEUE_FILE, queue_data)
-        next_post = queue[0]
+        posted_ids = set()
+        next_post = next((p for p in queue if has_image(p)), None)
+    if next_post is None:
+        print("ERROR: no post in the queue has a usable image in assets/. "
+              "Refusing to post (no-image rule).")
+        sys.exit(1)
 
     content = next_post["content"]
     post_id = next_post["id"]
     pillar = next_post.get("pillar", "general")
     title = next_post.get("title", content[:50])
-    image_name = next_post.get("image_path")  # rewritten to a bare filename, or null
+    image_name = next_post["image_path"]
+    image_file = os.path.join(ASSETS_DIR, image_name)
 
     print(f"Posting [{pillar}] post ID {post_id}: {title[:60]}")
     print(f"Preview: {content[:100]}...")
+    print(f"  Image: {image_name}")
 
-    image_file = os.path.join(ASSETS_DIR, image_name) if image_name else None
-    if image_file and os.path.exists(image_file):
-        print(f"  Image: {image_name}")
-        with open(image_file, "rb") as img:
-            resp = requests.post(
-                f"{GRAPH}/{PAGE_ID}/photos",
-                data={"caption": content, "access_token": PAGE_TOKEN},
-                files={"source": (image_name, img, "image/png")},
-            )
-        result = resp.json()
-        if "post_id" in result:
-            result["id"] = result["post_id"]
-    else:
-        if image_name:
-            print(f"  Image: '{image_name}' not found in assets/, posting text-only")
-        else:
-            print("  Image: none for this post, posting text-only")
+    with open(image_file, "rb") as img:
         resp = requests.post(
-            f"{GRAPH}/{PAGE_ID}/feed",
-            data={"message": content, "access_token": PAGE_TOKEN},
+            f"{GRAPH}/{PAGE_ID}/photos",
+            data={"caption": content, "access_token": PAGE_TOKEN},
+            files={"source": (image_name, img, "image/png")},
         )
-        result = resp.json()
+    result = resp.json()
+    if "post_id" in result:
+        result["id"] = result["post_id"]
 
     if "id" in result:
         fb_post_id = result["id"]
