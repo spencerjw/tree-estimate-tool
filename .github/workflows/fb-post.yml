@@ -45,3 +45,10 @@ jobs:
             git commit -m "bot(fb): post (auto-update queue + log)"
             git push
           fi
+
+      - name: Sync Notion calendar
+        run: python bots/fb_poster/scripts/notion_sync.py
+        continue-on-error: true
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}

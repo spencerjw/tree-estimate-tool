@@ -1,0 +1,26 @@
+name: Notion Calendar Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * *'   # daily 12:00 UTC — keep projected dates current
+
+concurrency:
+  group: notion-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install requests
+      - name: Reconcile Notion calendar with the post queue
+        run: python bots/fb_poster/scripts/notion_sync.py
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
