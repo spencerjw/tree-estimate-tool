@@ -18,7 +18,6 @@ Run it in the FB poster workflow and/or on demand via the notion-sync workflow.
 import datetime as dt
 import json
 import os
-import sys
 
 import requests
 
@@ -57,6 +56,14 @@ def load_json(path, default=None):
 def has_image(post):
     name = post.get("image_path")
     return bool(name) and os.path.exists(os.path.join(ASSETS_DIR, name))
+
+
+def normalize(s):
+    """Normalize a title for matching: straighten smart quotes, collapse whitespace, casefold."""
+    s = s or ""
+    for a, b in (("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'), (" ", " ")):
+        s = s.replace(a, b)
+    return " ".join(s.split()).strip().lower()
 
 
 def iter_slots(after):
@@ -147,6 +154,7 @@ def main():
     }
 
     rows = query_all_rows()
+    norm_rows = {normalize(nm): pg for nm, pg in rows.items()}
     print(f"Notion rows: {len(rows)} | queue posts: {len(queue)}")
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -155,9 +163,10 @@ def main():
     matched = unmatched = uploaded = 0
     for post in queue:
         title = (post.get("title") or "").strip()
-        page = rows.get(title)
+        key = normalize(title)
+        page = norm_rows.get(key)
         if page is None:  # fall back to prefix match
-            page = next((pg for nm, pg in rows.items() if nm.startswith(title[:40]) or title.startswith(nm[:40])), None)
+            page = next((pg for nm, pg in norm_rows.items() if nm.startswith(key[:40]) or key.startswith(nm[:40])), None)
         if page is None:
             print(f"  ! no Notion row for post {post.get('id')}: {title[:50]!r}")
             unmatched += 1
@@ -198,7 +207,8 @@ def main():
 
     print(f"\nDone: {matched} matched, {unmatched} unmatched, {uploaded} images uploaded.")
     if unmatched:
-        sys.exit(1)
+        print(f"WARNING: {unmatched} queued post(s) had no matching Notion row (listed above) — "
+              f"create/rename those rows so they appear in the calendar.")
 
 
 if __name__ == "__main__":
