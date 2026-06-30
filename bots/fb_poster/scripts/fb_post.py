@@ -2,20 +2,23 @@
 """
 TreeSnap Facebook Auto-Poster (GitHub Actions).
 
-Posts the next unposted item from the queue to the TreeSnap FB page, syncs
-status back to the Notion content calendar, appends to the log, and the
-workflow commits the updated queue + log back to the repo.
+Strict scheduling rules (enforced -- this script's reason for existing):
+  1. NEVER post out of order. Always pick the earliest unposted post in queue order.
+  2. NEVER post before the post's `scheduled_cdt` (parsed America/Chicago, compared UTC).
+  3. NEVER post without an image. `image_path` must be set AND the file must exist in
+     assets/. A missing image is a HARD ERROR -- the workflow fails so we get an alert.
+  4. NEVER skip ahead to "whatever's next" when the scheduled post can't ship. If the
+     next post isn't due yet, exit cleanly. If it has no image, exit non-zero (loud).
 
-Migrated from the OpenClaw cron + Forge workspace, June 2026. Credentials now
-come from environment variables (GitHub Secrets); per-post images are resolved
-by filename against bots/fb_poster/assets/ (the absolute OpenClaw media paths in
-the original queue have been rewritten to bare filenames).
+If the queue is fully posted, exit cleanly with no action. There is no auto-reset --
+when the queue is empty, add more posts to the queue.
 """
 
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -32,6 +35,13 @@ NOTION_DATA_SRC_ID = os.environ.get("NOTION_DATA_SOURCE_ID")
 NOTION_VERSION = "2025-09-03"
 GRAPH = "https://graph.facebook.com/v21.0"
 
+CT = ZoneInfo("America/Chicago")
+
+# GitHub Actions cron is almost always LATE (5-60 min), occasionally a few minutes early.
+# A small tolerance keeps a rare early fire from punting the post to the next slot (which
+# would post on the wrong calendar day). Anything beyond this window is treated as "not due."
+SCHEDULE_TOLERANCE = timedelta(minutes=30)
+
 
 def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -41,6 +51,21 @@ def load_json(path):
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def emit(line):
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    print(line)
+
+
+def parse_scheduled(s):
+    """Parse '2026-07-04T09:00:00' as naive America/Chicago, return UTC-aware datetime."""
+    naive = datetime.fromisoformat(s)
+    return naive.replace(tzinfo=CT).astimezone(timezone.utc)
 
 
 def log_post(post_id, fb_post_id, preview, success, error=None):
@@ -57,9 +82,8 @@ def log_post(post_id, fb_post_id, preview, success, error=None):
 
 
 def notion_update_post(post_title, fb_post_id, status="Posted"):
-    """Find the matching Notion entry by title and update status + FB Post ID."""
     if not (NOTION_KEY and NOTION_DATA_SRC_ID):
-        print("  Notion: no key/data-source configured, skipping sync")
+        emit("- Notion: no key/data-source configured, skipping sync")
         return False
     try:
         resp = requests.post(
@@ -70,10 +94,11 @@ def notion_update_post(post_title, fb_post_id, status="Posted"):
                 "Content-Type": "application/json",
             },
             json={"filter": {"property": "Name", "title": {"contains": post_title[:40]}}},
+            timeout=15,
         )
         results = resp.json().get("results", [])
         if not results:
-            print(f"  Notion: no match for '{post_title[:40]}'")
+            emit(f"- Notion: no match for '{post_title[:40]}'")
             return False
         page_id = results[0]["id"]
         fb_url = (
@@ -92,65 +117,72 @@ def notion_update_post(post_title, fb_post_id, status="Posted"):
                 "FB Post ID": {"rich_text": [{"text": {"content": fb_post_id}}]},
                 "Post URL": {"url": fb_url if fb_url else None},
             }},
+            timeout=15,
         )
         if update_resp.status_code == 200:
-            print(f"  Notion: updated '{post_title[:40]}' -> {status}")
+            emit(f"- Notion: updated '{post_title[:40]}' -> {status}")
             return True
-        print(f"  Notion: update failed: {update_resp.text[:100]}")
+        emit(f"- Notion: update failed: {update_resp.text[:100]}")
         return False
     except Exception as e:
-        print(f"  Notion: error - {e}")
+        emit(f"- Notion: error - {e}")
         return False
 
 
 def main():
-    try:
-        queue_data = load_json(QUEUE_FILE)
-    except Exception as e:
-        print(f"ERROR: Could not load queue: {e}")
-        sys.exit(1)
-
+    queue_data = load_json(QUEUE_FILE)
     queue = queue_data["queue"]
     posted_ids = set(queue_data.get("posted", []))
 
-    def has_image(p):
-        name = p.get("image_path")
-        return bool(name) and os.path.exists(os.path.join(ASSETS_DIR, name))
+    # RULE 1: earliest unposted in queue order. No skipping.
+    candidate = next((p for p in queue if p["id"] not in posted_ids), None)
+    if candidate is None:
+        emit("All posts in the queue have been posted. Nothing to do.")
+        return
 
-    # HARD RULE: never post without an image. Only ever select a post whose image
-    # actually exists in assets/. Imageless rows (or rows with a missing image file)
-    # are skipped and left in the queue — they are NEVER posted text-only.
-    skipped = [p["id"] for p in queue if p["id"] not in posted_ids and not has_image(p)]
-    if skipped:
-        print(f"  Skipping imageless posts (no-image rule): {skipped}")
+    post_id = candidate["id"]
+    title = candidate.get("title", candidate["content"][:50])
+    pillar = candidate.get("pillar", "general")
+    scheduled_str = candidate.get("scheduled_cdt")
 
-    next_post = next((p for p in queue if p["id"] not in posted_ids and has_image(p)), None)
-    if next_post is None:
-        print("All image-bearing posts cycled - resetting queue.")
-        queue_data["posted"] = []
-        posted_ids = set()
-        next_post = next((p for p in queue if has_image(p)), None)
-    if next_post is None:
-        print("ERROR: no post in the queue has a usable image in assets/. "
-              "Refusing to post (no-image rule).")
+    emit(f"## Candidate: post #{post_id} [{pillar}]")
+    emit(f"- Title: {title}")
+    emit(f"- Scheduled: {scheduled_str} CDT")
+
+    # RULE 2: schedule gate. Never post before the scheduled time.
+    if not scheduled_str:
+        emit(f"ERROR: post #{post_id} has no scheduled_cdt. Refusing to post.")
+        sys.exit(1)
+    sched_utc = parse_scheduled(scheduled_str)
+    now_utc = datetime.now(timezone.utc)
+    if now_utc + SCHEDULE_TOLERANCE < sched_utc:
+        emit(f"- Not due yet (now {now_utc.isoformat()} < scheduled {sched_utc.isoformat()} "
+             f"- {SCHEDULE_TOLERANCE.total_seconds()/60:.0f}min tolerance). "
+             "Skipping cleanly; will try again on the next cron.")
+        return
+
+    # RULE 3: image required. No silent skip-ahead; fail loudly if missing.
+    image_name = candidate.get("image_path")
+    if not image_name:
+        emit(f"ERROR: post #{post_id} ('{title[:60]}') has no image_path. "
+             "Refusing to post (no-image rule). Fix the queue: attach an image or remove this post.")
+        sys.exit(1)
+    image_file = os.path.join(ASSETS_DIR, image_name)
+    if not os.path.exists(image_file):
+        emit(f"ERROR: post #{post_id} image '{image_name}' not found in {ASSETS_DIR}. "
+             "Refusing to post. Commit the file or correct image_path.")
         sys.exit(1)
 
-    content = next_post["content"]
-    post_id = next_post["id"]
-    pillar = next_post.get("pillar", "general")
-    title = next_post.get("title", content[:50])
-    image_name = next_post["image_path"]
-    image_file = os.path.join(ASSETS_DIR, image_name)
-
-    print(f"Posting [{pillar}] post ID {post_id}: {title[:60]}")
-    print(f"Preview: {content[:100]}...")
-    print(f"  Image: {image_name}")
+    content = candidate["content"]
+    emit(f"- Image: {image_name}")
+    emit(f"- Preview: {content[:120]}...")
 
     with open(image_file, "rb") as img:
         resp = requests.post(
             f"{GRAPH}/{PAGE_ID}/photos",
             data={"caption": content, "access_token": PAGE_TOKEN},
             files={"source": (image_name, img, "image/png")},
+            timeout=60,
         )
     result = resp.json()
     if "post_id" in result:
@@ -158,14 +190,14 @@ def main():
 
     if "id" in result:
         fb_post_id = result["id"]
-        print(f"SUCCESS: Posted as {fb_post_id}")
+        emit(f"- **Posted:** {fb_post_id}")
         queue_data["posted"].append(post_id)
         save_json(QUEUE_FILE, queue_data)
         log_post(post_id, fb_post_id, content, True)
         notion_update_post(title, fb_post_id)
     else:
         error_msg = result.get("error", {}).get("message", str(result))
-        print(f"ERROR: {error_msg}")
+        emit(f"- ERROR: {error_msg}")
         log_post(post_id, None, content, False, error_msg)
         sys.exit(1)
 
