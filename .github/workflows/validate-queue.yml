@@ -1,0 +1,28 @@
+name: Validate FB Queue
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bots/fb_poster/config/fb_post_queue.json'
+      - 'bots/fb_poster/assets/**'
+      - 'bots/fb_poster/scripts/validate_queue.py'
+      - '.github/workflows/validate-queue.yml'
+  pull_request:
+    paths:
+      - 'bots/fb_poster/config/fb_post_queue.json'
+      - 'bots/fb_poster/assets/**'
+      - 'bots/fb_poster/scripts/validate_queue.py'
+      - '.github/workflows/validate-queue.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate FB post queue
+        run: python bots/fb_poster/scripts/validate_queue.py
