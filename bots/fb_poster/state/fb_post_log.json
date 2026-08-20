@@ -198,5 +198,13 @@
     "success": true,
     "error": null,
     "preview": "When a customer submits photos through your estimate tool, they see your company..."
+  },
+  {
+    "timestamp": "2026-08-20T23:05:39.132749+00:00",
+    "post_id": 231,
+    "fb_post_id": "1209658132223528_122129719977344519",
+    "success": true,
+    "error": null,
+    "preview": "Tree companies running manual estimates spend 6-8 hours a week driving to sites ..."
   }
 ]
