@@ -230,5 +230,13 @@
     "success": true,
     "error": null,
     "preview": "Customer submits photos at 7pm on a Tuesday.\n\nCompetitor: calls back Thursday. \"..."
+  },
+  {
+    "timestamp": "2026-08-29T14:05:33.545919+00:00",
+    "post_id": 235,
+    "fb_post_id": "1209658132223528_122131628493344519",
+    "success": true,
+    "error": null,
+    "preview": "Fair question. Here's what TreeSnap's AI looks for in customer photos:\n\nTree siz..."
   }
 ]
