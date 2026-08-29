@@ -15,7 +15,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # HARD STOP 2026-08-29 (Spencer): AI cinematic queue pulled.
+  # `gh workflow disable "FB Poster"` returned 403 from this agent token
+  # (actions:write not granted). This if: false is the code-level stop so
+  # merge cannot post. Do not remove until Spencer/CoS says the
+  # replacement queue is on main AND the workflow may run again.
   post:
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
