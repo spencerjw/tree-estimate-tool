@@ -99,17 +99,19 @@ If no pricing config is set, use regional market rates for the zip code provided
 You respond ONLY with valid JSON — no markdown, no prose, no explanation outside the JSON.
 
 When analyzing photos, assess:
-1. Tree species (if identifiable from visual characteristics)
-2. Approximate height and trunk diameter
-3. Overall health and structural condition
-4. Proximity to structures, powerlines, fences, or other obstacles
-5. Ground access difficulty (slope, confined space, equipment access)
-6. Any visible hazards (dead limbs, root damage, lean, rot, cracks)
+1. Approximate height and trunk diameter
+2. Overall health and structural condition
+3. Proximity to structures, powerlines, fences, or other obstacles
+4. Ground access difficulty (slope, confined space, equipment access)
+5. Any visible hazards (dead limbs, root damage, lean, rot, cracks)
+
+Do NOT identify or guess the tree species. It does not affect the price, and a
+wrong guess costs the company credibility with a customer who knows their tree.
+Describe the tree by size, condition, and hazards instead.
 
 Return a JSON object with this exact structure — all fields required:
 
 {
-  "species": "string — identified species or 'Unable to determine from photos'",
   "estimated_height": "string — e.g. '40–50 feet'",
   "trunk_diameter": "string — e.g. '18–24 inches at chest height'",
   "condition": "Healthy | Fair | Poor | Hazardous",
@@ -471,16 +473,34 @@ export default async function handler(req, res) {
     // 7. Send email notifications
     // -----------------------------------------------------------------------
     const resendKey = process.env.RESEND_API_KEY;
-    if (resendKey && customer.email) {
-      try {
-        await sendLeadNotificationEmail(customer, lead, estimate, photoSignedUrls);
-      } catch (err) {
-        console.error('Lead notification failed:', err?.message ?? err);
+    // On the demo the tester's own emails must send even if DEFAULT_BUSINESS_EMAIL
+    // is unset, so the demo is gated separately from the business notification.
+    if (resendKey && (customer.email || isDemo)) {
+      if (customer.email) {
+        try {
+          await sendLeadNotificationEmail(customer, lead, estimate, photoSignedUrls, { demoCopy: isDemo });
+        } catch (err) {
+          console.error('Lead notification failed:', err?.message ?? err);
+        }
       }
       try {
-        await sendHomeownerEstimateEmail({ ...lead }, estimate, customer);
+        await sendHomeownerEstimateEmail({ ...lead }, estimate, customer, { demo: isDemo });
       } catch (err) {
         console.error('Homeowner email failed:', err?.message ?? err);
+      }
+      // On the demo the submitter is a tree pro evaluating the product, not a
+      // homeowner. The lead alert above went to us; send them a copy too so they
+      // see both halves of what they'd get as a customer. Real tenants never do
+      // this — their leads stay between them and the homeowner.
+      const demoCopyTo = (lead.email || '').trim().toLowerCase();
+      if (isDemo && demoCopyTo && demoCopyTo !== (customer.email || '').trim().toLowerCase()) {
+        try {
+          await sendLeadNotificationEmail(
+            { ...customer, email: lead.email }, lead, estimate, photoSignedUrls, { demoCopy: isDemo },
+          );
+        } catch (err) {
+          console.error('Demo lead copy failed:', err?.message ?? err);
+        }
       }
     }
 

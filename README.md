@@ -7,7 +7,7 @@ A mobile-first web app that lets customers upload photos of their trees and rece
 1. Customer fills out a short form (name, email, phone, zip, service type)
 2. Uploads 1–3 photos of their tree(s)
 3. A Vercel serverless function sends the photos to Claude's vision API
-4. Claude analyzes species, size, condition, and complexity, then returns a structured JSON estimate
+4. Claude analyzes size, condition, and complexity, then returns a structured JSON estimate
 5. The estimate is rendered as a professional card with line items and a total range
 6. Lead data is logged server-side (ready to forward to your CRM or webhook)
 

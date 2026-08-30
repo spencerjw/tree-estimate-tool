@@ -49,7 +49,6 @@ const errorMsg       = document.getElementById('api-error-msg');
 const footerYear     = document.getElementById('footer-year');
 
 // Results refs
-const resSpecies       = document.getElementById('res-species');
 const resHeight        = document.getElementById('res-height');
 const resDiameter      = document.getElementById('res-diameter');
 const resCondition     = document.getElementById('res-condition');
@@ -244,7 +243,7 @@ function validateForm() {
 // Loading animation
 // ---------------------------------------------------------------------------
 const LOADING_STEPS = [
-  'Identifying species and size…',
+  'Measuring size and condition…',
   'Assessing condition and complexity…',
   'Calculating local market rates…', // personalized to "<market> market rates" once config loads
   'Finalizing your estimate…',
@@ -296,7 +295,6 @@ function complexityClass(c) {
 
 function renderResults(estimate, serviceType) {
   // Assessment card
-  resSpecies.textContent  = estimate.species            || '—';
   resHeight.textContent   = estimate.estimated_height   || '—';
   resDiameter.textContent = estimate.trunk_diameter     || '—';
 
