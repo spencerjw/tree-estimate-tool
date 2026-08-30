@@ -592,7 +592,9 @@ input.invalid {
 .results-sub { color: var(--text-muted); font-size: 0.88rem; font-family: var(--font-mono); margin-bottom: 20px; }
 
 /* Assessment grid */
-.assessment-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+/* Species carries the longest value in this grid and is the odd item out, so it
+   takes the full row rather than wrapping in a half-width cell. */
+.assessment-item--wide { grid-column: 1 / -1; }
 
 .assessment-grid {
   display: grid;

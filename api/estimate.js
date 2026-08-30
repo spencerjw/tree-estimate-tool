@@ -55,12 +55,25 @@ const SPECIES_CONFIDENCE_MIN = 85;
 
 // A model asked for a species will sometimes answer with its own uncertainty at
 // high confidence ("Unidentifiable", 95). That is not a species name.
-const NON_ANSWER = /unidentif|unable to (determine|identify)|not determinable|undetermined|indeterminate|unknown|unclear|cannot identify|can'?t identify|^n\/?a$/i;
+const NON_ANSWER = /unidentif|unable to (determine|identify)|not (determinable|clear|certain|sure|visible)|undetermined|indeterminate|unknown|unclear|hard to tell|difficult to|cannot identify|can'?t identify|likely|possibly|probably|appears? to be|perhaps|maybe|\bor\b|\?|^n\/?a$/i;
+
+// ...or with a category rather than a species. "Deciduous hardwood" carries no
+// hedge word but tells an arborist nothing he did not already know.
+const CATEGORY_ONLY = /^(?:(?:a|an|the|large|small|young|mature|native|common|deciduous|evergreen|broad-?leaf(?:ed)?|conifer(?:ous)?|hardwood|softwood|shade|ornamental|fruit|tree|shrub|species|type)\s*)+$/i;
 
 function applySpeciesGate(estimate) {
   const rawName = typeof estimate?.species === 'string' ? estimate.species.trim() : null;
   const rawPct  = estimate?.species_confidence ?? null;
-  const pct     = Number(rawPct);
+
+  // "92%" / "92 percent" are plausible given the schema only promises a number.
+  let pct = Number(typeof rawPct === 'string' ? rawPct.replace(/\s*(%|percent)\s*$/i, '').trim() : rawPct);
+  // The sibling VALIDATION_PROMPT in this file uses a 0.0-1.0 scale, so a 0-1
+  // answer here is a live risk. Treat it as a fraction rather than suppressing
+  // every estimate. Exactly 1 stays 1: it is ambiguous, and 1% is the safe read.
+  if (Number.isFinite(pct) && pct > 0 && pct < 1) {
+    console.log('SPECIES CONFIDENCE looked like a 0-1 fraction, scaled:', rawPct);
+    pct = pct * 100;
+  }
 
   // Keep what the model actually said. Without this we can never answer "how
   // often does the gate fire" or "is 85 the right number" from real traffic.
@@ -68,7 +81,12 @@ function applySpeciesGate(estimate) {
   estimate.species_raw = rawName;
   estimate.species_confidence_raw = rawPct;
 
-  const usable = rawName && !NON_ANSWER.test(rawName)
+  // A real species name is short: "Live oak", "Eastern red cedar", "Bald cypress".
+  const wordCount = rawName ? rawName.split(/\s+/).length : 0;
+  const usable = rawName
+    && wordCount <= 4
+    && !NON_ANSWER.test(rawName)
+    && !CATEGORY_ONLY.test(rawName)
     && Number.isFinite(pct) && pct >= SPECIES_CONFIDENCE_MIN;
 
   if (usable) {
@@ -153,6 +171,9 @@ your genuine probability the call is correct, not a hedge and not a boast. Bark,
 leaf shape, branching habit and silhouette are evidence; a bare or distant tree
 is usually not identifiable. Low confidence is a correct answer.
 
+Give species_confidence as a whole percent from 0 to 100, e.g. 92. Do not use a
+0.0-1.0 scale here.
+
 If you cannot identify the tree, return species as null and species_confidence as
 0. Never put the uncertainty itself in the species field: "Unidentifiable" and
 "Unable to determine" are not species names.
@@ -161,7 +182,7 @@ Return a JSON object with this exact structure — all fields required:
 
 {
   "species": "string — your best species call, e.g. 'Live oak'",
-  "species_confidence": number,
+  "species_confidence": number from 0 to 100 (a whole percent, e.g. 92 — NOT 0.92),
   "estimated_height": "string — e.g. '40–50 feet'",
   "trunk_diameter": "string — e.g. '18–24 inches at chest height'",
   "condition": "Healthy | Fair | Poor | Hazardous",
@@ -484,11 +505,16 @@ export default async function handler(req, res) {
     try {
       let raw = message.content[0].text.trim();
       raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      estimate = applySpeciesGate(JSON.parse(raw));
+      estimate = JSON.parse(raw);
     } catch {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
+    if (!estimate || typeof estimate !== 'object' || Array.isArray(estimate)) {
+      console.error('Claude returned JSON that is not an estimate object:', message.content[0].text);
+      return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
+    }
+    applySpeciesGate(estimate);
 
     const lead = { name, email, phone, zip, serviceType, timestamp: new Date().toISOString() };
 
