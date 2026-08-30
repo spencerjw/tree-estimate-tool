@@ -43,6 +43,47 @@ const DEMO_CONFIG = {
 // ---------------------------------------------------------------------------
 // Subdomain helpers
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Species confidence gate
+//
+// A certified arborist reads these estimates, and species is the one field he
+// can disprove on sight (it was wrong on both of Matt Roberts' jobs, 2026-08-29).
+// So the model must earn the right to name it. Enforced here rather than only in
+// the prompt, because a prompt is a request and this is a rule.
+// ---------------------------------------------------------------------------
+const SPECIES_CONFIDENCE_MIN = 85;
+
+// A model asked for a species will sometimes answer with its own uncertainty at
+// high confidence ("Unidentifiable", 95). That is not a species name.
+const NON_ANSWER = /unidentif|unable to (determine|identify)|not determinable|undetermined|indeterminate|unknown|unclear|cannot identify|can'?t identify|^n\/?a$/i;
+
+function applySpeciesGate(estimate) {
+  const rawName = typeof estimate?.species === 'string' ? estimate.species.trim() : null;
+  const rawPct  = estimate?.species_confidence ?? null;
+  const pct     = Number(rawPct);
+
+  // Keep what the model actually said. Without this we can never answer "how
+  // often does the gate fire" or "is 85 the right number" from real traffic.
+  // Stripped from the HTTP response; retained in the stored estimate_data.
+  estimate.species_raw = rawName;
+  estimate.species_confidence_raw = rawPct;
+
+  const usable = rawName && !NON_ANSWER.test(rawName)
+    && Number.isFinite(pct) && pct >= SPECIES_CONFIDENCE_MIN;
+
+  if (usable) {
+    estimate.species = rawName;
+    estimate.species_confidence = Math.min(100, Math.round(pct));
+  } else {
+    if (rawName) {
+      console.log('SPECIES SUPPRESSED:', JSON.stringify({ species: rawName, confidence: rawPct }));
+    }
+    estimate.species = 'Not determinable from photos';
+    estimate.species_confidence = null;
+  }
+  return estimate;
+}
+
 function extractSubdomain(host) {
   return host.split('.')[0].toLowerCase();
 }
@@ -99,19 +140,28 @@ If no pricing config is set, use regional market rates for the zip code provided
 You respond ONLY with valid JSON — no markdown, no prose, no explanation outside the JSON.
 
 When analyzing photos, assess:
-1. Approximate height and trunk diameter
-2. Overall health and structural condition
-3. Proximity to structures, powerlines, fences, or other obstacles
-4. Ground access difficulty (slope, confined space, equipment access)
-5. Any visible hazards (dead limbs, root damage, lean, rot, cracks)
+1. Tree species, with an honest confidence percentage
+2. Approximate height and trunk diameter
+3. Overall health and structural condition
+4. Proximity to structures, powerlines, fences, or other obstacles
+5. Ground access difficulty (slope, confined space, equipment access)
+6. Any visible hazards (dead limbs, root damage, lean, rot, cracks)
 
-Do NOT identify or guess the tree species. It does not affect the price, and a
-wrong guess costs the company credibility with a customer who knows their tree.
-Describe the tree by size, condition, and hazards instead.
+On species, be conservative. A certified arborist reads these estimates and a
+wrong species call costs the company credibility. Report species_confidence as
+your genuine probability the call is correct, not a hedge and not a boast. Bark,
+leaf shape, branching habit and silhouette are evidence; a bare or distant tree
+is usually not identifiable. Low confidence is a correct answer.
+
+If you cannot identify the tree, return species as null and species_confidence as
+0. Never put the uncertainty itself in the species field: "Unidentifiable" and
+"Unable to determine" are not species names.
 
 Return a JSON object with this exact structure — all fields required:
 
 {
+  "species": "string — your best species call, e.g. 'Live oak'",
+  "species_confidence": number,
   "estimated_height": "string — e.g. '40–50 feet'",
   "trunk_diameter": "string — e.g. '18–24 inches at chest height'",
   "condition": "Healthy | Fair | Poor | Hazardous",
@@ -434,7 +484,7 @@ export default async function handler(req, res) {
     try {
       let raw = message.content[0].text.trim();
       raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      estimate = JSON.parse(raw);
+      estimate = applySpeciesGate(JSON.parse(raw));
     } catch {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
@@ -511,7 +561,9 @@ export default async function handler(req, res) {
       range:     `${estimate.total_low}–${estimate.total_high}`,
     }));
 
-    return res.status(200).json({ estimate });
+    // The raw model call is kept for tuning, not shown to anyone.
+    const { species_raw, species_confidence_raw, ...publicEstimate } = estimate;
+    return res.status(200).json({ estimate: publicEstimate });
 
   } catch (err) {
     console.error('Estimate error:', err);

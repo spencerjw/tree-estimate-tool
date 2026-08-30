@@ -49,6 +49,7 @@ const errorMsg       = document.getElementById('api-error-msg');
 const footerYear     = document.getElementById('footer-year');
 
 // Results refs
+const resSpecies       = document.getElementById('res-species');
 const resHeight        = document.getElementById('res-height');
 const resDiameter      = document.getElementById('res-diameter');
 const resCondition     = document.getElementById('res-condition');
@@ -243,7 +244,7 @@ function validateForm() {
 // Loading animation
 // ---------------------------------------------------------------------------
 const LOADING_STEPS = [
-  'Measuring size and condition…',
+  'Identifying species and size…',
   'Assessing condition and complexity…',
   'Calculating local market rates…', // personalized to "<market> market rates" once config loads
   'Finalizing your estimate…',
@@ -295,6 +296,10 @@ function complexityClass(c) {
 
 function renderResults(estimate, serviceType) {
   // Assessment card
+  // Confidence is only present when the server-side gate let the call through.
+  resSpecies.textContent  = estimate.species_confidence == null
+    ? (estimate.species || '—')
+    : `${estimate.species} (${estimate.species_confidence}% confident)`;
   resHeight.textContent   = estimate.estimated_height   || '—';
   resDiameter.textContent = estimate.trunk_diameter     || '—';
 
