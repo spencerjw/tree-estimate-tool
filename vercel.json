@@ -12,6 +12,10 @@
       "dest": "/admin.html"
     },
     {
+      "src": "^/t/o\\.gif$",
+      "dest": "/api/track-open"
+    },
+    {
       "src": "^/api/(.*)",
       "dest": "/api/$1"
     },
