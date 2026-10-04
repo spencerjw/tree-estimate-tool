@@ -98,26 +98,47 @@ export function applySpeciesGate(estimate) {
     }
     estimate.species = 'Not determinable from photos';
     estimate.species_confidence = null;
-    scrubSuppressedSpecies(estimate);
+    scrubSuppressedSpecies(estimate, rawName);
   }
   return estimate;
 }
 
-// Common tree names (with their usual qualifiers) an estimate might drop into
-// a line item or the notes. 2026-10-04: species was gated to "Not determinable"
-// while the line item still said "storm-damaged cedar elm".
-const SPECIES_MENTION = /\b(?:(?:american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|shumard|bur|pin|laurel|texas|lacey|chinkapin|blackjack|willow|bigtooth|silver|sugar|bald|loblolly|slash|longleaf|shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|black|honey)\s+){0,2}(?:oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|pear|bois d'arc)s?\b/gi;
+// Species names an estimate might drop into a line item or the notes after the
+// gate hid the species (2026-10-04: "Not determinable from photos" next to a
+// line item reading "storm-damaged cedar elm"). Only QUALIFIED names are matched
+// ("cedar elm", "live oak", "Chinese pistache"), never a bare "oak" or "elm", so
+// arborist terms like "oak wilt", "Dutch elm disease" or "pine beetle" survive.
+const SPECIES_MENTION = new RegExp(
+  '\\b(?:(?:american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|shumard|bur|pin|laurel|' +
+  'texas|lacey|chinkapin|blackjack|spanish|mountain|desert|bigtooth|silver|sugar|bald|loblolly|slash|longleaf|' +
+  'shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|black|honey|mesquite)\\s+){1,2}' +
+  '(oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|juniper|sycamore|cottonwood|willow|magnolia|walnut|hickory|' +
+  'sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|pistache|tallow|laurel|pear)(s|es)?\\b',
+  'gi',
+);
 
-// The gate hid the species, so no species name may appear anywhere else in the
-// estimate. Each mention becomes "tree".
-function scrubSuppressedSpecies(estimate) {
-  const clean = t => t
-    .replace(SPECIES_MENTION, 'tree')
-    .replace(/\btree(?:\s+tree)+\b/gi, 'tree')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+// The gate hid the species, so no species name may appear anywhere else. Each
+// qualified mention becomes "tree" (or "trees"); the raw name the model gave is
+// replaced too. Paragraph breaks are kept.
+function scrubSuppressedSpecies(estimate, rawName) {
+  const raw = (rawName || '').trim();
+  const rawRe = raw.length >= 4 && !NON_ANSWER.test(raw) && !CATEGORY_ONLY.test(raw)
+    ? new RegExp(`\\b${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
+    : null;
+  const clean = t => {
+    let out = t.replace(SPECIES_MENTION, (_m, _head, plural) => (plural ? 'trees' : 'tree'));
+    if (rawRe) out = out.replace(rawRe, 'tree');
+    return out
+      .replace(/\btree(?:\s+tree)+\b/gi, 'tree')
+      .replace(/\b(a|A)n (tree)/g, '$1 $2')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+  };
   for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
     if (typeof item?.description === 'string') item.description = clean(item.description);
+  }
+  for (const key of ['recommended_followups', 'complexity_factors', 'safety_concerns']) {
+    if (Array.isArray(estimate[key])) estimate[key] = estimate[key].map(x => (typeof x === 'string' ? clean(x) : x));
   }
   if (typeof estimate.notes === 'string') estimate.notes = clean(estimate.notes);
 }
@@ -165,6 +186,14 @@ const DEFAULT_MINIMUM_JOB = 350;
 const DEFAULT_SCOPE = { removal: 'removal', trimming: 'trimming', storm_damage: 'cleanup', emergency: 'removal' };
 
 const roundTo25 = n => Math.round(n / 25) * 25;
+
+// An explicit 0 means "no minimum"; only a missing or unusable value takes the
+// default. Used by both the prompt and the totals so they always agree.
+function resolveMinimumJob(config = {}) {
+  const v = config?.minimum_job;
+  const n = Number(v);
+  return v === null || v === undefined || v === '' || !Number.isFinite(n) || n < 0 ? DEFAULT_MINIMUM_JOB : n;
+}
 // A usable price: a finite, non-negative number. '' and null are NOT zero.
 const toPrice = v => {
   if (v === null || v === undefined) return NaN;
@@ -248,9 +277,10 @@ export function enforceScope(estimate, serviceType, config = {}) {
       });
     }
     // Everything already in kept: don't also list it as "not included".
-    const keptNames = new Set(kept.map(i => i.description.toLowerCase()));
+    const bare = t => t.toLowerCase().replace(/^emergency\s+/i, '');
+    const keptNames = new Set(kept.map(i => bare(i.description)));
     for (let i = followups.length - 1; i >= 0; i--) {
-      if (keptNames.has(followups[i].toLowerCase().replace(/^emergency\s+/i, ''))) followups.splice(i, 1);
+      if (keptNames.has(bare(followups[i]))) followups.splice(i, 1);
     }
     if (!kept.length) throw new Error('Estimate has no priced line items');
   }
@@ -258,10 +288,7 @@ export function enforceScope(estimate, serviceType, config = {}) {
   estimate.line_items = kept;
   const sumLow = kept.reduce((t, i) => t + i.price_low, 0);
   const sumHigh = kept.reduce((t, i) => t + i.price_high, 0);
-  // An explicit 0 means "no minimum"; only a missing value takes the default.
-  const configured = Number(config.minimum_job);
-  const minimum = config.minimum_job === null || config.minimum_job === undefined || !Number.isFinite(configured)
-    ? DEFAULT_MINIMUM_JOB : configured;
+  const minimum = resolveMinimumJob(config);
   estimate.total_low = Math.max(sumLow, minimum);
   estimate.total_high = Math.max(sumHigh, minimum);
 
@@ -299,7 +326,7 @@ function buildSystemPrompt(customer, config, serviceType) {
       ? `$${cfg.base_rate_trimming_low}–$${cfg.base_rate_trimming_high}`
       : 'regional market rate';
 
-  const minJob = `$${cfg.minimum_job || DEFAULT_MINIMUM_JOB}`;
+  const minJob = `$${resolveMinimumJob(cfg)}`;
   const scopes = (SERVICE_SCOPES[serviceType] ?? ALL_SCOPES).join(', ');
   const serviceZips = cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'all areas';
   const addOnsText = cfg.add_ons?.length
@@ -371,6 +398,9 @@ Give species_confidence as a whole percent from 0 to 100, e.g. 92. Do not use a
 If you cannot identify the tree, return species as null and species_confidence as
 0. Never put the uncertainty itself in the species field: "Unidentifiable" and
 "Unable to determine" are not species names.
+
+Name the species ONLY in the species field. Everywhere else (line items, notes,
+factors, concerns) call it "the tree".
 
 Return a JSON object with this exact structure — all fields required:
 
