@@ -149,7 +149,8 @@ async function chargeNow(stripe, sub, pmId) {
         console.error('Billing return: settle attempt failed:', invoice.id, err.message);
         // A decline or a 3DS requirement won't change on a retry; don't hit the
         // card twice. Anything else may be a concurrent return mid-payment.
-        const final = err?.type === 'StripeCardError' || err?.code === 'authentication_required';
+        const final = err?.type === 'StripeCardError'
+          || ['authentication_required', 'invoice_payment_intent_requires_action', 'card_declined'].includes(err?.code);
         if (!final) await new Promise(r => setTimeout(r, 1500));
         invoice = await stripe.invoices.retrieve(invoice.id);
         if (invoice.status === 'paid') return true;
