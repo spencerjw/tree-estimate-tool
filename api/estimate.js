@@ -110,7 +110,10 @@ export function applySpeciesGate(estimate) {
 // Arborist terms that contain a tree name are set aside first and restored after,
 // so "oak wilt", "southern pine beetle", "Dutch elm disease" or a "cedar fence"
 // are never rewritten.
-const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*tx)\b/gi;
+const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*(?:tx|texas))\b/gi;
+// Place names that contain a tree word ("Cedar Park", "Oak Hill"). Case-sensitive
+// on purpose: a capitalized tree word followed by a capitalized place word.
+const PLACE_NAMES = /\b(?:Live Oak|Cedar|Oak|Pecan|Elm|Pine|Cypress|Walnut|Willow|Magnolia|Hickory|Mesquite|Shavano)\s+(?:Park|Hill|Hills|Valley|Creek|Branch|Grove|Springs?|Ridge|Cliff|Lake|Bluff|Point|Forest|Heights|Village|Bend|Station)\b/g;
 
 const SPECIES_HEADS = 'oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|' +
   'willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|' +
@@ -134,7 +137,8 @@ const keepCase = (str, offset, word) =>
 
 function scrubText(text, rawName) {
   const saved = [];
-  let out = text.replace(PROTECTED_TERMS, m => `\u0000${saved.push(m) - 1}\u0000`);
+  const keep = m => `\u0000${saved.push(m) - 1}\u0000`;
+  let out = text.replace(PROTECTED_TERMS, keep).replace(PLACE_NAMES, keep);
   out = out.replace(BOTANICAL, '');
   if (rawName && rawName.length >= 3) {
     const esc = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -199,11 +203,12 @@ function isDemoHost(host) {
 //     emergency service; the model prices everything at standard rates
 //   - totals are recomputed from the line items, with the minimum job applied
 // ---------------------------------------------------------------------------
+// 'other' (configured add-ons, permits, travel) is allowed for every service.
 export const SERVICE_SCOPES = {
-  removal:      ['removal', 'stump', 'haul', 'cleanup'],
-  trimming:     ['trimming', 'haul', 'cleanup'],
-  storm_damage: ['cleanup', 'haul', 'trimming'],
-  emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump'],
+  removal:      ['removal', 'stump', 'haul', 'cleanup', 'other'],
+  trimming:     ['trimming', 'haul', 'cleanup', 'other'],
+  storm_damage: ['cleanup', 'haul', 'trimming', 'other'],
+  emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump', 'other'],
 };
 const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
 
@@ -288,25 +293,18 @@ export function enforceScope(estimate, serviceType, config = {}) {
   }
 
   if (!kept.length) {
-    // Nothing fit the requested scope. Never send a $0 estimate: price what the
-    // model listed (still parsed, multiplied, and floored like everything else)
-    // and let the arborist judge it. Logged so the scope rules can be tuned.
-    console.error('ENFORCE SCOPE: nothing left in scope, keeping model items:', JSON.stringify({ serviceType, original }));
-    for (const item of original) {
-      const low = toPrice(item?.price_low ?? item?.low);
-      const high = toPrice(item?.price_high ?? item?.high);
-      const description = String(item?.description ?? '').trim();
-      if (!description || !Number.isFinite(low) || !Number.isFinite(high)) continue;
-      const lo = Math.min(low, high) * mult;
-      const hi = Math.max(low, high) * mult;
-      kept.push({
-        description: isEmergency ? description : stripEmergencyPrefix(description),
-        scope: String(item?.scope ?? 'other'),
-        price_low: mult === 1 ? lo : roundTo25(lo),
-        price_high: mult === 1 ? hi : roundTo25(hi),
-      });
-    }
-    if (!kept.length) throw new Error('Estimate has no priced line items');
+    // Nothing the model priced fits what the customer asked for. Don't price the
+    // out-of-scope work (that is the 2026-10-04 bug) and don't fail the request
+    // (that loses the lead): quote an on-site assessment at the minimum job and
+    // list the rest as not included. Logged so the scope rules can be tuned.
+    console.error('ENFORCE SCOPE: nothing priced in scope; assessment fallback:', JSON.stringify({ serviceType, original }));
+    const min = resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB;
+    kept.push({
+      description: 'On-site assessment to price this job',
+      scope: DEFAULT_SCOPE[serviceType] ?? 'other',
+      price_low: min,
+      price_high: min,
+    });
   }
 
   // Anything priced must not also be listed as "not included" (two items can
@@ -323,7 +321,9 @@ export function enforceScope(estimate, serviceType, config = {}) {
   estimate.total_high = Math.max(sumHigh, minimum);
 
   let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
-  if (!isEmergency) notes = stripEmergencyClaims(notes);
+  // The model is told not to apply or mention emergency pricing; any claim it
+  // makes is removed for every service, and only the code's own line is added.
+  notes = stripEmergencyClaims(notes);
   if (sumLow < minimum) {
     notes = `${notes}${notes ? ' ' : ''}The minimum job is ${money(minimum)}, so the total starts there.`;
   }

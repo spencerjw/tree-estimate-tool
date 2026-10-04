@@ -62,12 +62,33 @@ test('a missing scope defaults to the service, never empties the estimate', () =
   assert.deepEqual([e.total_low, e.total_high], [500, 800]);
 });
 
-test('if nothing is in scope, keep the model items rather than send $0', () => {
+test('if nothing is in scope, quote an assessment at the minimum and list the rest', () => {
   const e = enforceScope({ notes: 'Emergency rates apply.', total_low: 2000, total_high: 3000,
     line_items: [{ description: 'Remove standing tree', scope: 'removal', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
-  assert.deepEqual([e.total_low, e.total_high], [2000, 3000]);
-  assert.equal(e.line_items.length, 1);
-  assert.equal(e.notes, '');
+  assert.deepEqual([e.total_low, e.total_high], [350, 350]);
+  assert.equal(e.line_items[0].description, 'On-site assessment to price this job');
+  assert.match(e.notes, /Not included in this estimate: Remove standing tree\./);
+  assert.doesNotMatch(e.notes, /Emergency rates/);
+});
+
+test('no line items at all still produces an estimate, never an error', () => {
+  const e = enforceScope({ notes: '', recommended_followups: ['Remove the damaged tree'], line_items: [] }, 'storm_damage', {});
+  assert.deepEqual([e.total_low, e.total_high], [350, 350]);
+  assert.match(e.notes, /Not included in this estimate: Remove the damaged tree\./);
+});
+
+test('other-scope add-ons are priced', () => {
+  const e = enforceScope({ notes: '', line_items: [
+    { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
+    { description: 'Wood chipping', scope: 'other', price_low: 100, price_high: 200 }] }, 'storm_damage', {});
+  assert.deepEqual([e.total_low, e.total_high], [500, 800]);
+});
+
+test('place names with tree words survive the species scrub', () => {
+  const e = applySpeciesGate({ species: 'Unable to determine', species_confidence: 0,
+    notes: 'Common in the Cedar Park area and near Oak Hill. The cedar elm is split.',
+    line_items: [{ description: 'Cleanup', price_low: 1, price_high: 2 }] });
+  assert.equal(e.notes, 'Common in the Cedar Park area and near Oak Hill. The tree is split.');
 });
 
 test('string prices are parsed; unpriced items go to followups', () => {
@@ -135,11 +156,10 @@ test('blank and negative prices are not priced as $0 or discounts', () => {
   assert.match(e.notes, /Not included in this estimate: Haul away; Discount\./);
 });
 
-test('nothing in scope: model items are still parsed, multiplied, floored', () => {
+test('other-scope items are parsed and multiplied on the emergency service', () => {
   const em = enforceScope({ notes: '', line_items: [{ description: 'Crane rental', scope: 'other', price_low: '$1,000', price_high: '2,000' }] }, 'emergency', { emergency_multiplier: 1.5 });
   assert.deepEqual([em.total_low, em.total_high], [1500, 3000]);
   assert.match(em.notes, /1\.5x standard rates/);
-  assert.throws(() => enforceScope({ notes: '', line_items: [] }, 'removal', {}), /no priced line items/);
 });
 
 test('species scrub leaves arborist terms alone and keeps grammar and paragraphs', () => {
