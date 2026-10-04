@@ -152,8 +152,8 @@ test('species scrub leaves arborist terms alone and keeps grammar and paragraphs
   });
   assert.equal(e.line_items[0].description, 'Remove two trees');
   assert.equal(e.notes, 'Prune outside oak wilt season. Watch for Dutch elm disease and pine beetle.\n\nA tree nearby.');
-  assert.equal(e.complexity_factors[0], 'tree leaning toward fence');
-  assert.equal(e.recommended_followups[0], 'tree stump grinding');
+  assert.equal(e.complexity_factors[0], 'Tree leaning toward fence');
+  assert.equal(e.recommended_followups[0], 'Tree stump grinding');
 });
 
 test('the raw species the model gave is scrubbed even if not in the list', () => {
