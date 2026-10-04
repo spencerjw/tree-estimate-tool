@@ -132,7 +132,8 @@ function scrubSuppressedSpecies(estimate, rawName) {
       .replace(/\btree(?:\s+tree)+\b/gi, 'tree')
       .replace(/\b(a|A)n (tree)/g, '$1 $2')
       .replace(/[ \t]{2,}/g, ' ')
-      .trim();
+      .trim()
+      .replace(/^[a-z]/, c => (/^[A-Z]/.test(t.trim()) ? c.toUpperCase() : c));
   };
   for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
     if (typeof item?.description === 'string') item.description = clean(item.description);
