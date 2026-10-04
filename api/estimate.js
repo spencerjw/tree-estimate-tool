@@ -316,12 +316,12 @@ export function enforceScope(estimate, serviceType, config = {}) {
     // (that loses the lead): quote an on-site assessment at the minimum job and
     // list the rest as not included. Logged so the scope rules can be tuned.
     console.error('ENFORCE SCOPE: nothing priced in scope; assessment fallback:', JSON.stringify({ serviceType, original }));
-    // The site and emails promise a free on-site visit, so this is the shop's
-    // minimum job, not a charge for the visit. A shop with no minimum still
+    // A starting number, not a charge for the visit, and no promise about what
+    // the visit costs (that is the shop's call). A shop with no minimum still
     // needs a starting number, so the default stands in.
     const min = (resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB) * mult;
     kept.push({
-      description: 'Starting price, exact price set at your free on-site visit',
+      description: 'Starting price. Exact price set after an on-site look.',
       scope: DEFAULT_SCOPE[serviceType] ?? 'other',
       price_low: mult === 1 ? min : roundTo25(min),
       price_high: mult === 1 ? min : roundTo25(min),

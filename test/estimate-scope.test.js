@@ -66,7 +66,7 @@ test('if nothing is in scope, quote an assessment at the minimum and list the re
   const e = enforceScope({ notes: 'Emergency rates apply.', total_low: 2000, total_high: 3000,
     line_items: [{ description: 'Remove standing tree', scope: 'removal', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
   assert.deepEqual([e.total_low, e.total_high], [350, 350]);
-  assert.equal(e.line_items[0].description, 'Starting price, exact price set at your free on-site visit');
+  assert.equal(e.line_items[0].description, 'Starting price. Exact price set after an on-site look.');
   assert.match(e.notes, /Not included in this estimate: Remove standing tree\./);
   assert.doesNotMatch(e.notes, /Emergency rates/);
 });
