@@ -2,7 +2,7 @@
 // Requires bodyParser disabled so we can verify the raw request body.
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe } from '../lib/stripe.js';
+import { getStripe, subscriptionHasCard, trialDaysForCheckout } from '../lib/stripe.js';
 import { provisionCustomer } from '../lib/provision.js';
 import {
   sendTrialEndingEmail,
@@ -124,7 +124,7 @@ export default async function handler(req, res) {
         const sub = event.data.object;
         const customer = await getCustomerByStripeId(sub.customer);
         if (customer) {
-          await sendTrialEndingEmail(customer);
+          await sendTrialEndingEmail(customer, { hasCard: await subscriptionHasCard(stripe, sub) });
           await logEmail(customer.id, 'trial_ending', customer.email);
         }
         break;
@@ -317,7 +317,8 @@ export default async function handler(req, res) {
             console.error('Failed to set default payment method from setup checkout:', e.message);
           }
 
-          await provisionCustomer(lead);
+          const trialDays = await trialDaysForCheckout(stripe, session);
+          await provisionCustomer(lead, { trialDays });
           console.log(`Provisioned customer for lead ${lead_id}`);
         }
         break;
