@@ -5,6 +5,7 @@
 import { supabase } from '../lib/supabase.js';
 import { getStripe } from '../lib/stripe.js';
 import { findOrCreateStripeCustomer } from '../lib/provision.js';
+import { TIER_PRICES, tierLabel } from '../lib/emails.js';
 
 const SETUP_PRICE_IDS = {
   starter: process.env.STRIPE_PRICE_SETUP_STARTER,
@@ -138,7 +139,8 @@ export default async function handler(req, res) {
     // Create (or reuse) the Stripe customer up front and bill the setup fee to it,
     // so the card is saved to THIS customer (setup_future_usage). provision.js
     // creates the monthly subscription on the same customer after payment, and the
-    // 14-day trial auto-charges that saved card off-session when it ends. Uses the
+    // trial auto-charges that saved card off-session when it ends (a $0 BETA30
+    // checkout saves none; that trial pauses at its end instead). Uses the
     // same idempotency key as provision.js, so the customer is never duplicated.
     const stripeCustomer = await findOrCreateStripeCustomer(stripe, lead);
     await supabase.from('leads').update({ stripe_customer_id: stripeCustomer.id }).eq('id', lead.id);
@@ -154,6 +156,15 @@ export default async function handler(req, res) {
       // (real setup fees are non-zero), but don't rely on it for live $0 sessions.
       payment_intent_data:   { setup_future_usage: 'off_session' },
       metadata:              { lead_id: lead.id, tier: lead.tier, subdomain: lead.subdomain },
+      // Checkout bills only the setup fee, so state the recurring price here,
+      // where the card is entered.
+      custom_text: {
+        submit: {
+          message: `After your free trial, your TreeSnap ${tierLabel(lead.tier)} plan is `
+            + `$${TIER_PRICES[lead.tier]}/month. Nothing monthly is charged before the trial ends, `
+            + `and you can cancel before then by replying to your welcome email.`,
+        },
+      },
       success_url:           `${appUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:            `${appUrl}/onboard?token=${token}`,
     });

@@ -2,10 +2,12 @@
 // Requires bodyParser disabled so we can verify the raw request body.
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe, subscriptionHasCard, trialDaysForCheckout } from '../lib/stripe.js';
+import { getStripe, isNoCardTrial, trialDaysForCheckout } from '../lib/stripe.js';
+import { billingLinkUrl } from '../lib/billing-link.js';
 import { provisionCustomer } from '../lib/provision.js';
 import {
   sendTrialEndingEmail,
+  sendTrialPausedEmail,
   sendSubscriptionStartedEmail,
   sendPaymentFailedEmail,
   sendCancellationEmail,
@@ -74,6 +76,13 @@ async function getRawBody(req) {
   });
 }
 
+// Admin "extend trial" on a paused no-card trial replaces the subscription (Stripe
+// won't re-trial a paused one). Events from the replaced subscription must not
+// touch the customer: its cancel would otherwise mark the shop canceled.
+function isStaleSubscription(customer, sub) {
+  return !!(customer?.stripe_subscription_id && sub?.id && customer.stripe_subscription_id !== sub.id);
+}
+
 async function getCustomerByStripeId(stripeCustomerId) {
   const { data } = await supabase
     .from('customers')
@@ -123,8 +132,12 @@ export default async function handler(req, res) {
       case 'customer.subscription.trial_will_end': {
         const sub = event.data.object;
         const customer = await getCustomerByStripeId(sub.customer);
-        if (customer) {
-          await sendTrialEndingEmail(customer, { hasCard: await subscriptionHasCard(stripe, sub) });
+        if (customer && !isStaleSubscription(customer, sub)) {
+          const noCard = await isNoCardTrial(stripe, sub);
+          await sendTrialEndingEmail(customer, {
+            noCard,
+            billingUrl: noCard ? billingLinkUrl(customer.id) : null,
+          });
           await logEmail(customer.id, 'trial_ending', customer.email);
         }
         break;
@@ -138,6 +151,9 @@ export default async function handler(req, res) {
         const priceId = sub.items?.data[0]?.price?.id;
         const tier = PRICE_TO_TIER[priceId];
         const status = STATUS_MAP[sub.status] ?? sub.status;
+
+        const customer = await getCustomerByStripeId(sub.customer);
+        if (isStaleSubscription(customer, sub)) break;
 
         const updates = {
           status,
@@ -153,6 +169,13 @@ export default async function handler(req, res) {
           .from('customers')
           .update(updates)
           .eq('stripe_customer_id', sub.customer);
+
+        // A no-card trial just ended and Stripe paused it: send the owner a card link.
+        const prevStatus = event.data.previous_attributes?.status;
+        if (customer && sub.status === 'paused' && prevStatus && prevStatus !== 'paused') {
+          await sendTrialPausedEmail(customer, billingLinkUrl(customer.id));
+          await logEmail(customer.id, 'trial_paused', customer.email);
+        }
         break;
       }
 
@@ -162,6 +185,7 @@ export default async function handler(req, res) {
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
         const periodEnd = toIso(subPeriodEnd(sub));
+        if (isStaleSubscription(await getCustomerByStripeId(sub.customer), sub)) break;
 
         await supabase
           .from('customers')
@@ -302,8 +326,9 @@ export default async function handler(req, res) {
 
           // Persist the setup-fee card as the customer's default payment method so
           // the monthly subscription (created in provisionCustomer) auto-charges it
-          // off-session when the 14-day trial ends. Best-effort: if it fails the
-          // trial still starts; the trial-ending email is the safety net.
+          // off-session when the trial ends. Best-effort: if it fails the trial
+          // still starts; the trial-ending email is the safety net. A $0 checkout
+          // (e.g. BETA30) has no card; that trial pauses at its end instead.
           try {
             if (session.customer && session.payment_intent) {
               const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
@@ -317,8 +342,11 @@ export default async function handler(req, res) {
             console.error('Failed to set default payment method from setup checkout:', e.message);
           }
 
+          // Throws on a Stripe error -> 500 -> Stripe redelivers. Better than
+          // quietly provisioning 14 days for someone promised 30.
           const trialDays = await trialDaysForCheckout(stripe, session);
-          await provisionCustomer(lead, { trialDays });
+          const collectedCard = (session.amount_total ?? 1) > 0;
+          await provisionCustomer(lead, { trialDays, collectedCard });
           console.log(`Provisioned customer for lead ${lead_id}`);
         }
         break;

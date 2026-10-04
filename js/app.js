@@ -460,7 +460,7 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
   try {
     const resp = await fetch('/api/config');
     if (!resp.ok) return;
-    const { businessName, phone, theme, subdomain, market } = await resp.json();
+    const { businessName, phone, theme, subdomain, market, status } = await resp.json();
 
     // Tag every subsequent GA4 hit with the tenant (hostname is also auto-captured).
     TENANT = subdomain || '';
@@ -509,7 +509,62 @@ document.getElementById('cta-restart-btn').addEventListener('click', () => {
         ctaBtn.textContent = `📞 Call ${phone} — Book Your Free On-Site Visit`;
       }
     }
+
+    if (['paused', 'past_due', 'canceled'].includes(status)) {
+      showPausedNotice(businessName, phone, status !== 'canceled');
+    }
   } catch {
     // Silently fail — page works fine with default static content
   }
 })();
+
+// ---------------------------------------------------------------------------
+// Paused tool — the API rejects estimates for paused / past-due / canceled
+// shops, so replace the form with a notice instead of letting a homeowner fill
+// it in and hit an error. The owner can ask for a billing link; it goes only to
+// the email on file, never to this page.
+// ---------------------------------------------------------------------------
+function showPausedNotice(businessName, phone, offerOwnerLink) {
+  const section = document.getElementById('form-section');
+  if (!section) return;
+  section.replaceChildren();
+
+  const h = document.createElement('h2');
+  h.textContent = 'Online estimates are paused';
+  const p = document.createElement('p');
+  p.textContent = `${businessName || 'This company'} isn't taking online estimate requests right now.`;
+  section.append(h, p);
+
+  if (phone) {
+    const call = document.createElement('a');
+    call.href = `tel:${phone}`;
+    call.className = 'btn btn-primary';
+    call.textContent = `Call ${phone}`;
+    section.append(call);
+  }
+
+  if (offerOwnerLink) {
+    const owner = document.createElement('p');
+    owner.style.cssText = 'margin-top:32px;font-size:14px;opacity:0.8;';
+    owner.textContent = 'Own this business? ';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Email me a link to turn it back on';
+    btn.style.cssText = 'background:none;border:none;padding:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit;';
+    const msg = document.createElement('span');
+    owner.append(btn, msg);
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/billing', { method: 'POST' });
+        const j = await r.json();
+        btn.remove();
+        msg.textContent = j.message || 'If this is your shop, we just emailed the owner a link.';
+      } catch {
+        btn.disabled = false;
+        msg.textContent = ' Something went wrong. Try again.';
+      }
+    });
+    section.append(owner);
+  }
+}
