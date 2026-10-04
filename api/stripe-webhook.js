@@ -252,14 +252,15 @@ export default async function handler(req, res) {
       // ----------------------------------------------------------------------
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
-        if (isStaleSubscription(await getCustomerByStripeId(invoice.customer), { id: invoiceSubscriptionId(invoice) })) break;
+        const failedFor = await getCustomerByStripeId(invoice.customer);
+        if (isStaleSubscription(failedFor, { id: invoiceSubscriptionId(invoice) })) break;
 
         await supabase
           .from('customers')
           .update({ status: 'past_due' })
           .eq('stripe_customer_id', invoice.customer);
 
-        const customer = await getCustomerByStripeId(invoice.customer);
+        const customer = failedFor;
         if (customer) {
           await sendPaymentFailedEmail(customer);
           await logEmail(customer.id, 'payment_failed', customer.email);
