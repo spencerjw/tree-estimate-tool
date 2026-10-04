@@ -3,7 +3,7 @@ import test from 'node:test';
 
 process.env.SUPABASE_URL ??= 'http://fake.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'x';
-const { enforceScope } = await import('../api/estimate.js');
+const { enforceScope, applySpeciesGate } = await import('../api/estimate.js');
 
 // The 2026-10-04 storm-damage run, as the model returned it before this change.
 const stormRun = () => ({
@@ -93,4 +93,51 @@ test('small prices are not rounded to $0 outside the emergency multiplier', () =
     { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
     { description: 'Disposal fee', scope: 'haul', price_low: 10, price_high: 12 }] }, 'storm_damage', {});
   assert.deepEqual([e.line_items[1].price_low, e.line_items[1].price_high], [10, 12]);
+});
+
+test('a gated species never reappears in a line item or the notes (2026-10-04 removal run)', () => {
+  const e = applySpeciesGate({
+    species: 'Unable to determine', species_confidence: 0,
+    notes: 'The cedar elm has a split trunk. Possibly a live oak nearby.',
+    line_items: [{ description: 'Emergency hazardous tree removal — storm-damaged cedar elm with major trunk failure', price_low: 1, price_high: 2 }],
+  });
+  assert.equal(e.species, 'Not determinable from photos');
+  assert.equal(e.line_items[0].description, 'Emergency hazardous tree removal — storm-damaged tree with major trunk failure');
+  assert.equal(e.notes, 'The tree has a split trunk. Possibly a tree nearby.');
+  assert.doesNotMatch(JSON.stringify(e.line_items) + e.notes, /elm|oak/i);
+});
+
+test('a confident species is left alone everywhere', () => {
+  const e = applySpeciesGate({ species: 'Live oak', species_confidence: 95, notes: 'Live oak, prune outside oak wilt season.',
+    line_items: [{ description: 'Prune live oak', price_low: 1, price_high: 2 }] });
+  assert.equal(e.species, 'Live oak');
+  assert.equal(e.line_items[0].description, 'Prune live oak');
+});
+
+test('an explicit minimum of 0 means no floor', () => {
+  const e = enforceScope({ notes: '', line_items: [{ description: 'Prune one limb', scope: 'trimming', price_low: 150, price_high: 250 }] }, 'trimming', { minimum_job: 0 });
+  assert.deepEqual([e.total_low, e.total_high], [150, 250]);
+  assert.doesNotMatch(e.notes, /minimum/);
+});
+
+test('emergency scrub keeps a following sentence that starts with a digit, and keeps paragraphs', () => {
+  const e = enforceScope({ notes: 'Emergency rates apply. 3 limbs are down on the fence.\n\nAccess is open.',
+    line_items: [{ description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 }] }, 'storm_damage', {});
+  assert.equal(e.notes, '3 limbs are down on the fence.\n\nAccess is open.');
+});
+
+test('blank and negative prices are not priced as $0 or discounts', () => {
+  const e = enforceScope({ notes: '', line_items: [
+    { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
+    { description: 'Haul away', scope: 'haul', price_low: '', price_high: '' },
+    { description: 'Discount', scope: 'haul', price_low: -100, price_high: -100 }] }, 'storm_damage', {});
+  assert.equal(e.line_items.length, 1);
+  assert.match(e.notes, /Not included in this estimate: Haul away; Discount\./);
+});
+
+test('nothing in scope: model items are still parsed, multiplied, floored', () => {
+  const em = enforceScope({ notes: '', line_items: [{ description: 'Crane rental', scope: 'other', price_low: '$1,000', price_high: '2,000' }] }, 'emergency', { emergency_multiplier: 1.5 });
+  assert.deepEqual([em.total_low, em.total_high], [1500, 3000]);
+  assert.match(em.notes, /1\.5x standard rates/);
+  assert.throws(() => enforceScope({ notes: '', line_items: [] }, 'removal', {}), /no priced line items/);
 });

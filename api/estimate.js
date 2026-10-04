@@ -61,7 +61,7 @@ const NON_ANSWER = /unidentif|unable to (determine|identify)|not (determinable|c
 // hedge word but tells an arborist nothing he did not already know.
 const CATEGORY_ONLY = /^(?:(?:a|an|the|large|small|young|mature|native|common|deciduous|evergreen|broad-?leaf(?:ed)?|conifer(?:ous)?|hardwood|softwood|shade|ornamental|fruit|tree|shrub|species|type)\s*)+$/i;
 
-function applySpeciesGate(estimate) {
+export function applySpeciesGate(estimate) {
   const rawName = typeof estimate?.species === 'string' ? estimate.species.trim() : null;
   const rawPct  = estimate?.species_confidence ?? null;
 
@@ -98,8 +98,28 @@ function applySpeciesGate(estimate) {
     }
     estimate.species = 'Not determinable from photos';
     estimate.species_confidence = null;
+    scrubSuppressedSpecies(estimate);
   }
   return estimate;
+}
+
+// Common tree names (with their usual qualifiers) an estimate might drop into
+// a line item or the notes. 2026-10-04: species was gated to "Not determinable"
+// while the line item still said "storm-damaged cedar elm".
+const SPECIES_MENTION = /\b(?:(?:american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|shumard|bur|pin|laurel|texas|lacey|chinkapin|blackjack|willow|bigtooth|silver|sugar|bald|loblolly|slash|longleaf|shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|black|honey)\s+){0,2}(?:oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|pear|bois d'arc)s?\b/gi;
+
+// The gate hid the species, so no species name may appear anywhere else in the
+// estimate. Each mention becomes "tree".
+function scrubSuppressedSpecies(estimate) {
+  const clean = t => t
+    .replace(SPECIES_MENTION, 'tree')
+    .replace(/\btree(?:\s+tree)+\b/gi, 'tree')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
+    if (typeof item?.description === 'string') item.description = clean(item.description);
+  }
+  if (typeof estimate.notes === 'string') estimate.notes = clean(estimate.notes);
 }
 
 function extractSubdomain(host) {
@@ -145,14 +165,27 @@ const DEFAULT_MINIMUM_JOB = 350;
 const DEFAULT_SCOPE = { removal: 'removal', trimming: 'trimming', storm_damage: 'cleanup', emergency: 'removal' };
 
 const roundTo25 = n => Math.round(n / 25) * 25;
-const toPrice = v => Number(typeof v === 'string' ? v.replace(/[$,\s]/g, '') : v);
+// A usable price: a finite, non-negative number. '' and null are NOT zero.
+const toPrice = v => {
+  if (v === null || v === undefined) return NaN;
+  const n = Number(typeof v === 'string' ? v.replace(/[$,\s]/g, '') : v);
+  return typeof v === 'string' && !v.replace(/[$,\s]/g, '') ? NaN : (n >= 0 ? n : NaN);
+};
 const money = n => `$${Number(n).toLocaleString('en-US')}`;
 
+// Drops only the sentences that claim emergency pricing. Splits on sentence ends
+// followed by any non-space start (digits and lowercase too), and keeps line
+// breaks between paragraphs.
 function stripEmergencyClaims(notes) {
   return notes
-    .split(/(?<=[.!?])\s+(?=[A-Z"'(])/)
-    .filter(sentence => !EMERGENCY_CLAIM.test(sentence))
-    .join(' ')
+    .split(/\n/)
+    .map(para => para
+      .split(/(?<=[.!?])\s+(?=\S)/)
+      .filter(sentence => !EMERGENCY_CLAIM.test(sentence))
+      .join(' ')
+      .trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -196,18 +229,39 @@ export function enforceScope(estimate, serviceType, config = {}) {
   }
 
   if (!kept.length) {
-    // Never send a $0 estimate. Keep what the model priced and let the arborist
-    // judge it; log so the scope rules can be tuned on real cases.
+    // Nothing fit the requested scope. Never send a $0 estimate: price what the
+    // model listed (still parsed, multiplied, and floored like everything else)
+    // and let the arborist judge it. Logged so the scope rules can be tuned.
     console.error('ENFORCE SCOPE: nothing left in scope, keeping model items:', JSON.stringify({ serviceType, original }));
-    estimate.notes = typeof estimate.notes === 'string' && !isEmergency ? stripEmergencyClaims(estimate.notes) : estimate.notes;
-    delete estimate.recommended_followups;
-    return estimate;
+    for (const item of original) {
+      const low = toPrice(item?.price_low ?? item?.low);
+      const high = toPrice(item?.price_high ?? item?.high);
+      const description = String(item?.description ?? '').trim();
+      if (!description || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+      const lo = Math.min(low, high) * mult;
+      const hi = Math.max(low, high) * mult;
+      kept.push({
+        description: isEmergency ? description : description.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase()),
+        scope: String(item?.scope ?? 'other'),
+        price_low: mult === 1 ? lo : roundTo25(lo),
+        price_high: mult === 1 ? hi : roundTo25(hi),
+      });
+    }
+    // Everything already in kept: don't also list it as "not included".
+    const keptNames = new Set(kept.map(i => i.description.toLowerCase()));
+    for (let i = followups.length - 1; i >= 0; i--) {
+      if (keptNames.has(followups[i].toLowerCase().replace(/^emergency\s+/i, ''))) followups.splice(i, 1);
+    }
+    if (!kept.length) throw new Error('Estimate has no priced line items');
   }
 
   estimate.line_items = kept;
   const sumLow = kept.reduce((t, i) => t + i.price_low, 0);
   const sumHigh = kept.reduce((t, i) => t + i.price_high, 0);
-  const minimum = Number(config.minimum_job) || DEFAULT_MINIMUM_JOB;
+  // An explicit 0 means "no minimum"; only a missing value takes the default.
+  const configured = Number(config.minimum_job);
+  const minimum = config.minimum_job === null || config.minimum_job === undefined || !Number.isFinite(configured)
+    ? DEFAULT_MINIMUM_JOB : configured;
   estimate.total_low = Math.max(sumLow, minimum);
   estimate.total_high = Math.max(sumHigh, minimum);
 
