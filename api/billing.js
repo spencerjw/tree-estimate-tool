@@ -147,9 +147,13 @@ async function chargeNow(stripe, sub, pmId) {
         return invoice.status === 'paid';
       } catch (err) {
         console.error('Billing return: settle attempt failed:', invoice.id, err.message);
-        await new Promise(r => setTimeout(r, 1500));
+        // A decline or a 3DS requirement won't change on a retry; don't hit the
+        // card twice. Anything else may be a concurrent return mid-payment.
+        const final = err?.type === 'StripeCardError' || err?.code === 'authentication_required';
+        if (!final) await new Promise(r => setTimeout(r, 1500));
         invoice = await stripe.invoices.retrieve(invoice.id);
         if (invoice.status === 'paid') return true;
+        if (final) return false;
       }
     }
     return false;
@@ -172,14 +176,15 @@ async function chargeNow(stripe, sub, pmId) {
   if (sub.status === 'paused') {
     // Paying a stray invoice does not unpause a sub; only resume does. Resuming
     // creates the first invoice but doesn't charge it (open or draft,
-    // auto_advance off). The key is per pause (the pre-resume latest invoice),
-    // so overlapping returns resume once.
+    // auto_advance off). The key comes from the snapshot this request loaded
+    // BEFORE anything changed (the pre-resume latest invoice), so overlapping
+    // returns share it and Stripe resumes once.
     const current = await stripe.subscriptions.retrieve(sub.id);
     if (current.status === 'paused') {
       const resumed = await stripe.subscriptions.resume(
         sub.id,
         { billing_cycle_anchor: 'now', expand: ['latest_invoice'] },
-        { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(current.latest_invoice)}` },
+        { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(sub.latest_invoice)}` },
       );
       const first = resumed.latest_invoice;
       if (first && first.status !== 'paid' && !(await settle(first))) return 'failed';
