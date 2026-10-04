@@ -145,15 +145,36 @@ test('nothing in scope: model items are still parsed, multiplied, floored', () =
 test('species scrub leaves arborist terms alone and keeps grammar and paragraphs', () => {
   const e = applySpeciesGate({
     species: 'Unable to determine', species_confidence: 0,
-    notes: 'Prune outside oak wilt season. Watch for Dutch elm disease and pine beetle.\n\nAn eastern red cedar nearby.',
+    notes: 'Watch for Dutch elm disease and southern pine beetle near the red cedar privacy fence.\n\nAn eastern red cedar nearby.',
     complexity_factors: ['Spanish oak leaning toward fence'],
     recommended_followups: ['Cedar elm stump grinding'],
-    line_items: [{ description: 'Remove two live oaks', price_low: 1, price_high: 2 }],
+    line_items: [{ description: 'Remove two live oak trees', price_low: 1, price_high: 2 }],
   });
   assert.equal(e.line_items[0].description, 'Remove two trees');
-  assert.equal(e.notes, 'Prune outside oak wilt season. Watch for Dutch elm disease and pine beetle.\n\nA tree nearby.');
+  assert.equal(e.notes, 'Watch for Dutch elm disease and southern pine beetle near the red cedar privacy fence.\n\nA tree nearby.');
   assert.equal(e.complexity_factors[0], 'Tree leaning toward fence');
   assert.equal(e.recommended_followups[0], 'Tree stump grinding');
+});
+
+test('bare species names, hedged raw names and botanical names are scrubbed', () => {
+  const e = applySpeciesGate({ species: 'Pecan (likely)', species_confidence: 60,
+    notes: 'Live oak (Quercus virginiana) with decay. Hackberry nearby.',
+    line_items: [{ description: 'Oak removal', price_low: 1, price_high: 2 }, { description: 'Pecan limb cleanup', price_low: 1, price_high: 2 }] });
+  assert.deepEqual(e.line_items.map(i => i.description), ['Tree removal', 'Tree limb cleanup']);
+  assert.equal(e.notes, 'Tree with decay. Tree nearby.');
+});
+
+test('oak-specific advice is dropped when the species is hidden', () => {
+  const e = applySpeciesGate({ species: 'Live oak', species_confidence: 70,
+    notes: 'Clean cuts needed. Paint wounds on the oak right away; avoid pruning Feb-June (oak wilt).',
+    line_items: [{ description: 'Prune', price_low: 1, price_high: 2 }] });
+  assert.equal(e.notes, 'Clean cuts needed.');
+});
+
+test('a priced item is never also listed as not included', () => {
+  const e = enforceScope({ notes: '', recommended_followups: ['Remove tree'],
+    line_items: [{ description: 'Remove tree', scope: 'removal', price_low: 1000, price_high: 2000 }] }, 'removal', {});
+  assert.doesNotMatch(e.notes, /Not included/);
 });
 
 test('the raw species the model gave is scrubbed even if not in the list', () => {

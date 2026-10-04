@@ -103,45 +103,72 @@ export function applySpeciesGate(estimate) {
   return estimate;
 }
 
-// Species names an estimate might drop into a line item or the notes after the
-// gate hid the species (2026-10-04: "Not determinable from photos" next to a
-// line item reading "storm-damaged cedar elm"). Only QUALIFIED names are matched
-// ("cedar elm", "live oak", "Chinese pistache"), never a bare "oak" or "elm", so
-// arborist terms like "oak wilt", "Dutch elm disease" or "pine beetle" survive.
-const SPECIES_MENTION = new RegExp(
-  '\\b(?:(?:american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|shumard|bur|pin|laurel|' +
-  'texas|lacey|chinkapin|blackjack|spanish|mountain|desert|bigtooth|silver|sugar|bald|loblolly|slash|longleaf|' +
-  'shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|black|honey|mesquite)\\s+){1,2}' +
-  '(oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|juniper|sycamore|cottonwood|willow|magnolia|walnut|hickory|' +
-  'sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|pistache|tallow|laurel|pear)(s|es)?\\b',
-  'gi',
-);
+// When the gate hides the species, no species name may appear anywhere else in
+// the estimate (2026-10-04: "Not determinable from photos" next to a line item
+// reading "storm-damaged cedar elm").
+//
+// Arborist terms that contain a tree name are set aside first and restored after,
+// so "oak wilt", "southern pine beetle", "Dutch elm disease" or a "cedar fence"
+// are never rewritten.
+const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*tx)\b/gi;
 
-// The gate hid the species, so no species name may appear anywhere else. Each
-// qualified mention becomes "tree" (or "trees"); the raw name the model gave is
-// replaced too. Paragraph breaks are kept.
+const SPECIES_HEADS = 'oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|' +
+  'willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|' +
+  'pistache|tallow|laurel|pear|bois d\'arc';
+const SPECIES_QUALIFIERS = 'american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|' +
+  'shumard|bur|pin|laurel|texas|lacey|chinkapin|blackjack|spanish|mountain|desert|bigtooth|silver|sugar|bald|' +
+  'loblolly|slash|longleaf|shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|' +
+  'black|honey|common|cherry';
+// Qualifiers are optional: a bare "Oak" or "Pecan" is a species call too.
+const SPECIES_MENTION = new RegExp(
+  `\\b(?:(?:${SPECIES_QUALIFIERS})\\s+){0,2}(?:${SPECIES_HEADS})(s|es)?(\\s+trees?)?\\b`, 'gi');
+// A botanical name in parentheses: "(Quercus virginiana)".
+const BOTANICAL = /\s*\((?:[A-Z][a-z]+\s+[a-z]+(?:\s+(?:var\.|subsp\.)\s+[a-z]+)?)\)/g;
+// Advice that only makes sense if the species call were right.
+const SPECIES_ADVICE = /\boak\s+wilt\b/i;
+
+// Capitalize only at the start of a sentence: "Oak removal" -> "Tree removal",
+// but "Remove Chinese tallow" -> "Remove tree".
+const keepCase = (str, offset, word) =>
+  (offset === 0 || /[.!?\n]\s*$/.test(str.slice(0, offset)) ? word[0].toUpperCase() + word.slice(1) : word);
+
+function scrubText(text, rawName) {
+  const saved = [];
+  let out = text.replace(PROTECTED_TERMS, m => `\u0000${saved.push(m) - 1}\u0000`);
+  out = out.replace(BOTANICAL, '');
+  if (rawName && rawName.length >= 3) {
+    const esc = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(?<![\\w])${esc}(?![\\w])`, 'gi'), (_m, offset, str) => keepCase(str, offset, 'tree'));
+  }
+  out = out.replace(SPECIES_MENTION, (_m, plural, treeWord, offset, str) =>
+    keepCase(str, offset, plural || (treeWord && /trees$/i.test(treeWord)) ? 'trees' : 'tree'));
+  out = out
+    .replace(/\btrees?(?:\s+trees?)+\b/gi, m => (/s$/i.test(m) ? 'trees' : 'tree'))
+    .replace(/\b(a|A)n (trees?)\b/g, '$1 $2')
+    .replace(/\u0000(\d+)\u0000/g, (_m, i) => saved[Number(i)])
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  return out.replace(/^[a-z]/, c => (/^[A-Z]/.test(text.trim()) ? c.toUpperCase() : c));
+}
+
+function dropSpeciesAdvice(notes) {
+  return notes
+    .split(/\n/)
+    .map(para => para.split(/(?<=[.!?])\s+(?=\S)/).filter(s => !SPECIES_ADVICE.test(s)).join(' '))
+    .join('\n')
+    .trim();
+}
+
 function scrubSuppressedSpecies(estimate, rawName) {
   const raw = (rawName || '').trim();
-  const rawRe = raw.length >= 4 && !NON_ANSWER.test(raw) && !CATEGORY_ONLY.test(raw)
-    ? new RegExp(`\\b${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
-    : null;
-  const clean = t => {
-    let out = t.replace(SPECIES_MENTION, (_m, _head, plural) => (plural ? 'trees' : 'tree'));
-    if (rawRe) out = out.replace(rawRe, 'tree');
-    return out
-      .replace(/\btree(?:\s+tree)+\b/gi, 'tree')
-      .replace(/\b(a|A)n (tree)/g, '$1 $2')
-      .replace(/[ \t]{2,}/g, ' ')
-      .trim()
-      .replace(/^[a-z]/, c => (/^[A-Z]/.test(t.trim()) ? c.toUpperCase() : c));
-  };
+  const name = raw.length >= 3 && !NON_ANSWER.test(raw) && !CATEGORY_ONLY.test(raw) ? raw : null;
   for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
-    if (typeof item?.description === 'string') item.description = clean(item.description);
+    if (typeof item?.description === 'string') item.description = scrubText(item.description, name);
   }
   for (const key of ['recommended_followups', 'complexity_factors', 'safety_concerns']) {
-    if (Array.isArray(estimate[key])) estimate[key] = estimate[key].map(x => (typeof x === 'string' ? clean(x) : x));
+    if (Array.isArray(estimate[key])) estimate[key] = estimate[key].map(x => (typeof x === 'string' ? scrubText(x, name) : x));
   }
-  if (typeof estimate.notes === 'string') estimate.notes = clean(estimate.notes);
+  if (typeof estimate.notes === 'string') estimate.notes = scrubText(dropSpeciesAdvice(estimate.notes), name);
 }
 
 function extractSubdomain(host) {
@@ -196,6 +223,8 @@ function resolveMinimumJob(config = {}) {
   return v === null || v === undefined || v === '' || !Number.isFinite(n) || n < 0 ? DEFAULT_MINIMUM_JOB : n;
 }
 // A usable price: a finite, non-negative number. '' and null are NOT zero.
+const stripEmergencyPrefix = t => t.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase());
+
 const toPrice = v => {
   if (v === null || v === undefined) return NaN;
   const n = Number(typeof v === 'string' ? v.replace(/[$,\s]/g, '') : v);
@@ -247,7 +276,7 @@ export function enforceScope(estimate, serviceType, config = {}) {
       followups.push(description);
       continue;
     }
-    if (!isEmergency) description = description.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase());
+    if (!isEmergency) description = stripEmergencyPrefix(description);
     const lo = Math.min(low, high) * mult;
     const hi = Math.max(low, high) * mult;
     kept.push({
@@ -271,20 +300,20 @@ export function enforceScope(estimate, serviceType, config = {}) {
       const lo = Math.min(low, high) * mult;
       const hi = Math.max(low, high) * mult;
       kept.push({
-        description: isEmergency ? description : description.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase()),
+        description: isEmergency ? description : stripEmergencyPrefix(description),
         scope: String(item?.scope ?? 'other'),
         price_low: mult === 1 ? lo : roundTo25(lo),
         price_high: mult === 1 ? hi : roundTo25(hi),
       });
     }
-    // Everything already in kept: don't also list it as "not included".
-    const bare = t => t.toLowerCase().replace(/^emergency\s+/i, '');
-    const keptNames = new Set(kept.map(i => bare(i.description)));
-    for (let i = followups.length - 1; i >= 0; i--) {
-      if (keptNames.has(bare(followups[i]))) followups.splice(i, 1);
-    }
     if (!kept.length) throw new Error('Estimate has no priced line items');
   }
+
+  // Anything priced must not also be listed as "not included" (two items can
+  // read the same after the species scrub, or across the emergency prefix).
+  const bare = t => stripEmergencyPrefix(t).toLowerCase();
+  const priced = new Set(kept.map(i => bare(i.description)));
+  for (let i = followups.length - 1; i >= 0; i--) if (priced.has(bare(followups[i]))) followups.splice(i, 1);
 
   estimate.line_items = kept;
   const sumLow = kept.reduce((t, i) => t + i.price_low, 0);
@@ -375,9 +404,10 @@ or price a crane unless the photos show the tree cannot be climbed or rigged
 (for example it is leaning on a house with no drop zone). A fence or a house
 nearby means careful rigging, not a crane.
 
-OAKS. If you identify an oak, say in notes that pruning wounds should be
-painted right away and that pruning is best avoided February through June
-(oak wilt).
+OAKS. Only if you name an oak in the species field with confidence of 85 or
+more, say in notes that pruning wounds should be painted right away and that
+pruning is best avoided February through June (oak wilt). Otherwise give no
+species-specific advice.
 
 CONDITION, chosen strictly:
 - Healthy: no visible defects.
