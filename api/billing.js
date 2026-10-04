@@ -5,7 +5,7 @@
 // POST /api/billing              from a paused shop page: email the owner a fresh link
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe, defaultCardId } from '../lib/stripe.js';
+import { getStripe, defaultCardId, idOf } from '../lib/stripe.js';
 import { billingLinkUrl, verifyBillingLink } from '../lib/billing-link.js';
 import { rateLimit, clientIp } from '../lib/rate-limit.js';
 import { sendBillingLinkEmail } from '../lib/emails.js';
@@ -92,7 +92,13 @@ async function afterPortal(res, stripe, customer) {
       '<p>Your card is on file. This account is not active right now; reply to any TreeSnap email to restart it.</p>');
   }
   if (sub.default_payment_method !== pmId) {
-    await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
+    try {
+      await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
+    } catch (err) {
+      // Not fatal: the charge below passes the card explicitly, and the card is
+      // already the customer default for later renewals.
+      console.error('Billing return: could not pin card on subscription:', err.message);
+    }
   }
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
 
@@ -125,31 +131,47 @@ async function afterPortal(res, stripe, customer) {
 
 // Returns 'paid' | 'failed' | 'nothing'.
 async function chargeNow(stripe, sub, pmId) {
-  let invoice = (await stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 1 })).data[0];
-  if (!invoice && sub.status === 'paused') {
-    // Resuming creates the first invoice but doesn't charge it (open, auto_advance
-    // off) and the sub stays paused until it's paid. The key is per pause (the
-    // pre-resume latest invoice), so two overlapping returns resume once.
+  // Unpaid invoices on this sub, oldest first: open renewals (past_due/unpaid can
+  // have several) and any draft a previous return left before finalizing.
+  const unpaid = async () => {
+    const [open, draft] = await Promise.all([
+      stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 }),
+      stripe.invoices.list({ subscription: sub.id, status: 'draft', limit: 20 }),
+    ]);
+    return [...draft.data, ...open.data].sort((x, y) => x.created - y.created);
+  };
+  let invoices = await unpaid();
+
+  if (!invoices.length && sub.status === 'paused') {
+    // Resuming creates the first invoice but doesn't charge it (open or draft,
+    // auto_advance off) and the sub stays paused until it's paid. The key is per
+    // pause (the pre-resume latest invoice), so overlapping returns resume once.
     const resumed = await stripe.subscriptions.resume(
       sub.id,
       { billing_cycle_anchor: 'now', expand: ['latest_invoice'] },
-      { idempotencyKey: `treesnap-resume-${sub.id}-${typeof sub.latest_invoice === 'string' ? sub.latest_invoice : sub.latest_invoice?.id}` },
+      { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(sub.latest_invoice)}` },
     );
-    invoice = resumed.latest_invoice;
-    if (invoice?.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
+    invoices = resumed.latest_invoice ? [resumed.latest_invoice] : await unpaid();
   }
-  if (!invoice) return 'nothing';
-  if (invoice.status === 'open') {
+  if (!invoices.length) return 'nothing';
+
+  for (let invoice of invoices) {
     try {
-      invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId },
-        { idempotencyKey: `treesnap-pay-${invoice.id}-${pmId}` });
+      if (invoice.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
+      // No idempotency key: Stripe caches a decline under a key for 24h, which
+      // would replay it after the owner fixes the card. A paid invoice can't be
+      // charged twice, and a concurrent return's payment is caught below.
+      if (invoice.status === 'open') invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId });
     } catch (err) {
-      // A concurrent return may have paid it already.
       invoice = await stripe.invoices.retrieve(invoice.id);
-      if (invoice.status !== 'paid') throw err;
+      if (invoice.status !== 'paid') {
+        console.error('Billing return: invoice not paid:', invoice.id, err.message);
+        return 'failed';
+      }
     }
+    if (invoice.status !== 'paid') return 'failed';
   }
-  return invoice.status === 'paid' ? 'paid' : 'failed';
+  return 'paid';
 }
 
 // "Email me a link" on a paused shop page. The response never says whether the
@@ -175,13 +197,12 @@ async function requestLink(req, res) {
       const sub = await getStripe().subscriptions.retrieve(customer.stripe_subscription_id);
       if (['paused', 'past_due', 'unpaid'].includes(sub.status)) {
         // One send per shop per hour, three per day: the button is on a public
-        // page, so anyone can press it. Counted only when an email would actually go out, and
+        // page, so anyone can press it. Only presses that would send are counted (one that hits the daily cap
+        // still uses that hour's slot), and it
         // fails closed (no send) if the limiter itself can't be reached.
-        const perShop = await rateLimit({ bucket: 'billing_link_send', identifier: customer.id, windowSeconds: 3600, max: 1 });
-        const perDay = perShop.allowed && !perShop.error
-          ? await rateLimit({ bucket: 'billing_link_send_day', identifier: customer.id, windowSeconds: 86400, max: 3 })
-          : { allowed: false };
-        if (perShop.allowed && !perShop.error && perDay.allowed && !perDay.error) {
+        const ok = r => r.allowed && !r.error;
+        const perHour = await rateLimit({ bucket: 'billing_link_send', identifier: customer.id, windowSeconds: 3600, max: 1 });
+        if (ok(perHour) && ok(await rateLimit({ bucket: 'billing_link_send_day', identifier: customer.id, windowSeconds: 86400, max: 3 }))) {
           await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
         }
       }
