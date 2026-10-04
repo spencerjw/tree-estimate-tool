@@ -10,7 +10,8 @@ import { billingLinkUrl, verifyBillingLink } from '../lib/billing-link.js';
 import { rateLimit, clientIp } from '../lib/rate-limit.js';
 import { sendBillingLinkEmail } from '../lib/emails.js';
 
-const PORTAL_CONFIGURATION = 'bpc_1UMrOKGTb7xBM80F1LABPaA1'; // update payment method + invoices, no cancel
+// Update payment method + invoices, no cancel. Env override for test mode.
+const PORTAL_CONFIGURATION = process.env.STRIPE_PORTAL_CONFIGURATION || 'bpc_1UMrOKGTb7xBM80F1LABPaA1';
 
 function page(res, status, title, body) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -98,12 +99,21 @@ async function afterPortal(res, stripe, customer) {
       if (sub.default_payment_method !== pmId) {
         await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
       }
-      if (openInvoice) {
-        paid = (await stripe.invoices.pay(openInvoice.id, { payment_method: pmId })).status === 'paid';
-      } else {
-        const resumed = await stripe.subscriptions.resume(sub.id, { billing_cycle_anchor: 'now' });
-        paid = resumed.status === 'active';
+      let invoice = openInvoice;
+      if (!invoice) {
+        // Resuming creates the first invoice but does not charge it (it comes
+        // back open, auto_advance off), and the sub stays paused until it's paid.
+        const resumed = await stripe.subscriptions.resume(sub.id, {
+          billing_cycle_anchor: 'now',
+          expand: ['latest_invoice'],
+        });
+        invoice = resumed.latest_invoice;
+        if (invoice?.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
       }
+      if (invoice?.status === 'open') {
+        invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId });
+      }
+      paid = invoice?.status === 'paid';
     } catch (err) {
       console.error('Billing return: charge failed:', err.message);
     }

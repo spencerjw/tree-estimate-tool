@@ -235,10 +235,13 @@ export default async function handler(req, res) {
           .update({ status: 'active', current_period_start: periodStart, current_period_end: periodEnd, canceled_at: null })
           .eq('id', customer.id);
 
-        // "Subscription started" on the first real charge: the trial converting at its
-        // end (subscription_cycle) or a paused no-card trial resumed with a card
-        // (subscription_update). A recovery from past_due is not a start.
-        if (['trialing', 'paused'].includes(customer.status)) {
+        // "Subscription started" on the customer's first real charge, whether the
+        // trial converted at its end or a paused no-card trial resumed with a card.
+        // Decided from Stripe's invoice history, not the DB status: Stripe can send
+        // subscription.updated (already active) before this event.
+        const paid = await stripe.invoices.list({ customer: invoice.customer, status: 'paid', limit: 100 });
+        const isFirstCharge = !paid.data.some(i => i.id !== invoice.id && i.amount_paid > 0);
+        if (isFirstCharge) {
           const amountPaid = Math.round(invoice.amount_paid / 100);
           await sendSubscriptionStartedEmail(
             { ...customer, status: 'active', current_period_end: periodEnd },
