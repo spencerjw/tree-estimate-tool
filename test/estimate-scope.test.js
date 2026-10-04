@@ -66,7 +66,7 @@ test('if nothing is in scope, quote an assessment at the minimum and list the re
   const e = enforceScope({ notes: 'Emergency rates apply.', total_low: 2000, total_high: 3000,
     line_items: [{ description: 'Remove standing tree', scope: 'removal', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
   assert.deepEqual([e.total_low, e.total_high], [350, 350]);
-  assert.equal(e.line_items[0].description, 'On-site assessment to price this job');
+  assert.equal(e.line_items[0].description, 'Minimum job charge, exact price set at your free on-site visit');
   assert.match(e.notes, /Not included in this estimate: Remove standing tree\./);
   assert.doesNotMatch(e.notes, /Emergency rates/);
 });
@@ -82,6 +82,12 @@ test('other-scope add-ons are priced', () => {
     { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
     { description: 'Wood chipping', scope: 'other', price_low: 100, price_high: 200 }] }, 'storm_damage', {});
   assert.deepEqual([e.total_low, e.total_high], [500, 800]);
+  const back = enforceScope({ notes: '', line_items: [
+    { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
+    { description: 'Crane rental', scope: 'other', price_low: 1000, price_high: 2000 },
+    { description: 'Hazard tree removal', scope: 'other', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
+  assert.deepEqual([back.total_low, back.total_high], [400, 600]);
+  assert.match(back.notes, /Not included in this estimate: Crane rental; Hazard tree removal\./);
 });
 
 test('place names with tree words survive the species scrub', () => {
@@ -157,7 +163,7 @@ test('blank and negative prices are not priced as $0 or discounts', () => {
 });
 
 test('other-scope items are parsed and multiplied on the emergency service', () => {
-  const em = enforceScope({ notes: '', line_items: [{ description: 'Crane rental', scope: 'other', price_low: '$1,000', price_high: '2,000' }] }, 'emergency', { emergency_multiplier: 1.5 });
+  const em = enforceScope({ notes: '', line_items: [{ description: 'Travel fee', scope: 'other', price_low: '$1,000', price_high: '2,000' }] }, 'emergency', { emergency_multiplier: 1.5 });
   assert.deepEqual([em.total_low, em.total_high], [1500, 3000]);
   assert.match(em.notes, /1\.5x standard rates/);
 });
@@ -204,6 +210,26 @@ test('the raw species the model gave is scrubbed even if not in the list', () =>
 });
 
 test('emergency fallback: a priced item is not also listed as not included', () => {
-  const e = enforceScope({ notes: '', line_items: [{ description: 'Emergency crane rental', scope: 'other', price_low: 1000, price_high: 2000 }] }, 'emergency', { emergency_multiplier: 1.5 });
+  const e = enforceScope({ notes: '', line_items: [{ description: 'Emergency travel fee', scope: 'other', price_low: 1000, price_high: 2000 }] }, 'emergency', { emergency_multiplier: 1.5 });
   assert.doesNotMatch(e.notes, /Not included/);
+});
+
+test('title-case line items are still scrubbed; explicit place names are kept', () => {
+  const e = applySpeciesGate({ species: 'Unable to determine', species_confidence: 0,
+    notes: 'Serving Cedar Park and the City of Live Oak.',
+    line_items: [{ description: 'Hanging Pecan Branch Cleanup', price_low: 1, price_high: 2 }] });
+  assert.equal(e.line_items[0].description, 'Hanging tree Branch Cleanup');
+  assert.equal(e.notes, 'Serving Cedar Park and the City of Live Oak.');
+});
+
+test('emergency fallback applies the multiplier its note claims', () => {
+  const e = enforceScope({ notes: '', line_items: [] }, 'emergency', { emergency_multiplier: 1.5 });
+  assert.deepEqual([e.total_low, e.total_high], [525, 525]);
+  assert.match(e.notes, /1\.5x standard rates/);
+});
+
+test('emergency notes keep the model safety sentence', () => {
+  const e = enforceScope({ notes: 'Emergency service rates apply because the limb is on the roof; keep people out of the back bedroom.',
+    line_items: [{ description: 'Remove limb from roof', scope: 'cleanup', price_low: 800, price_high: 1200 }] }, 'emergency', { emergency_multiplier: 1.5 });
+  assert.match(e.notes, /keep people out of the back bedroom/);
 });

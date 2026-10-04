@@ -111,9 +111,9 @@ export function applySpeciesGate(estimate) {
 // so "oak wilt", "southern pine beetle", "Dutch elm disease" or a "cedar fence"
 // are never rewritten.
 const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*(?:tx|texas))\b/gi;
-// Place names that contain a tree word ("Cedar Park", "Oak Hill"). Case-sensitive
-// on purpose: a capitalized tree word followed by a capitalized place word.
-const PLACE_NAMES = /\b(?:Live Oak|Cedar|Oak|Pecan|Elm|Pine|Cypress|Walnut|Willow|Magnolia|Hickory|Mesquite|Shavano)\s+(?:Park|Hill|Hills|Valley|Creek|Branch|Grove|Springs?|Ridge|Cliff|Lake|Bluff|Point|Forest|Heights|Village|Bend|Station)\b/g;
+// Texas place names that contain a tree word. An explicit list, case-sensitive:
+// a pattern would also protect title-case line items like "Pecan Branch Cleanup".
+const PLACE_NAMES = /\b(?:Cedar Park|Cedar Hill|Cedar Creek|Oak Hill|Oak Cliff|Oak Ridge|Oak Point|Shavano Park|Pecan Valley|Elm Creek|Pine Bluff|Willow Park|Walnut Springs|Live Oak County|City of Live Oak)\b/g;
 
 const SPECIES_HEADS = 'oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|' +
   'willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|' +
@@ -203,13 +203,22 @@ function isDemoHost(host) {
 //     emergency service; the model prices everything at standard rates
 //   - totals are recomputed from the line items, with the minimum job applied
 // ---------------------------------------------------------------------------
-// 'other' (configured add-ons, permits, travel) is allowed for every service.
+// 'other' is allowed for every service, but only for the shop's configured
+// add-ons and fee-type lines (permit, travel, disposal); see isAllowedOther.
 export const SERVICE_SCOPES = {
   removal:      ['removal', 'stump', 'haul', 'cleanup', 'other'],
   trimming:     ['trimming', 'haul', 'cleanup', 'other'],
   storm_damage: ['cleanup', 'haul', 'trimming', 'other'],
   emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump', 'other'],
 };
+const OTHER_FEE = /\b(permit|travel|trip|disposal|dump|chipping|chips?|mulch|fee)\b/i;
+const NOT_OTHER = /\b(crane|remov|take ?down|fell|stump|grind|bucket truck|climb)/i;
+function isAllowedOther(description, config) {
+  if (NOT_OTHER.test(description)) return false;
+  const addOns = Array.isArray(config?.add_ons) ? config.add_ons : [];
+  const d = description.toLowerCase();
+  return OTHER_FEE.test(description) || addOns.some(a => a?.name && d.includes(String(a.name).toLowerCase()));
+}
 const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
 
 // A sentence in notes that claims emergency pricing. Matched per sentence, so a
@@ -277,7 +286,7 @@ export function enforceScope(estimate, serviceType, config = {}) {
     // A missing scope is the model forgetting the field, not out-of-scope work.
     let scope = String(item?.scope ?? '').toLowerCase().trim();
     if (!scope) scope = DEFAULT_SCOPE[serviceType] ?? 'other';
-    if (!allowed.includes(scope)) {
+    if (!allowed.includes(scope) || (scope === 'other' && !isAllowedOther(description, config))) {
       followups.push(description);
       continue;
     }
@@ -298,12 +307,15 @@ export function enforceScope(estimate, serviceType, config = {}) {
     // (that loses the lead): quote an on-site assessment at the minimum job and
     // list the rest as not included. Logged so the scope rules can be tuned.
     console.error('ENFORCE SCOPE: nothing priced in scope; assessment fallback:', JSON.stringify({ serviceType, original }));
-    const min = resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB;
+    // The site and emails promise a free on-site visit, so this is the shop's
+    // minimum job, not a charge for the visit. A shop with no minimum still
+    // needs a starting number, so the default stands in.
+    const min = (resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB) * mult;
     kept.push({
-      description: 'On-site assessment to price this job',
+      description: 'Minimum job charge, exact price set at your free on-site visit',
       scope: DEFAULT_SCOPE[serviceType] ?? 'other',
-      price_low: min,
-      price_high: min,
+      price_low: mult === 1 ? min : roundTo25(min),
+      price_high: mult === 1 ? min : roundTo25(min),
     });
   }
 
@@ -321,9 +333,10 @@ export function enforceScope(estimate, serviceType, config = {}) {
   estimate.total_high = Math.max(sumHigh, minimum);
 
   let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
-  // The model is told not to apply or mention emergency pricing; any claim it
-  // makes is removed for every service, and only the code's own line is added.
-  notes = stripEmergencyClaims(notes);
+  // Outside the emergency service the model's emergency-pricing claims are
+  // removed. On the emergency service its sentences stay (they can carry safety
+  // instructions); the code's own surcharge line is the authoritative one.
+  if (!isEmergency) notes = stripEmergencyClaims(notes);
   if (sumLow < minimum) {
     notes = `${notes}${notes ? ' ' : ''}The minimum job is ${money(minimum)}, so the total starts there.`;
   }
@@ -780,7 +793,7 @@ export default async function handler(req, res) {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
-    if (!estimate || typeof estimate !== 'object' || Array.isArray(estimate)) {
+    if (!estimate || typeof estimate !== 'object' || Array.isArray(estimate) || !Array.isArray(estimate.line_items)) {
       console.error('Claude returned JSON that is not an estimate object:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
