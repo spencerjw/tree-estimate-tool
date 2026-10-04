@@ -175,8 +175,14 @@ export default async function handler(req, res) {
         // A no-card trial just ended and Stripe paused it: send the owner a card link.
         const prevStatus = event.data.previous_attributes?.status;
         if (customer && sub.status === 'paused' && prevStatus && prevStatus !== 'paused') {
-          await sendTrialPausedEmail(customer, billingLinkUrl(customer.id));
-          await logEmail(customer.id, 'trial_paused', customer.email);
+          // Best-effort: the status change is already saved, and a 500 here would
+          // make Stripe redeliver and re-send the email.
+          try {
+            await sendTrialPausedEmail(customer, billingLinkUrl(customer.id));
+            await logEmail(customer.id, 'trial_paused', customer.email);
+          } catch (e) {
+            console.error('Trial paused email failed:', e.message);
+          }
         }
         break;
       }
@@ -229,8 +235,10 @@ export default async function handler(req, res) {
           .update({ status: 'active', current_period_start: periodStart, current_period_end: periodEnd, canceled_at: null })
           .eq('id', customer.id);
 
-        // Only send "subscription started" email for the first charge (trial → paid conversion)
-        if (invoice.billing_reason === 'subscription_create') {
+        // "Subscription started" on the first real charge: the trial converting at its
+        // end (subscription_cycle) or a paused no-card trial resumed with a card
+        // (subscription_update). A recovery from past_due is not a start.
+        if (['trialing', 'paused'].includes(customer.status)) {
           const amountPaid = Math.round(invoice.amount_paid / 100);
           await sendSubscriptionStartedEmail(
             { ...customer, status: 'active', current_period_end: periodEnd },

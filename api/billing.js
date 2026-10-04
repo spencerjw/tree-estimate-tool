@@ -5,7 +5,7 @@
 // POST /api/billing              from a paused shop page: email the owner a fresh link
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe, hasCardOnFile } from '../lib/stripe.js';
+import { getStripe } from '../lib/stripe.js';
 import { billingLinkUrl, verifyBillingLink } from '../lib/billing-link.js';
 import { rateLimit, clientIp } from '../lib/rate-limit.js';
 import { sendBillingLinkEmail } from '../lib/emails.js';
@@ -77,7 +77,9 @@ export default async function handler(req, res) {
 //   past_due (renewal declined)   -> retry the open invoice with the new card.
 // The webhook moves the shop to active once the invoice is paid.
 async function afterPortal(res, stripe, customer) {
-  if (!(await hasCardOnFile(stripe, customer.stripe_customer_id))) {
+  const c = await stripe.customers.retrieve(customer.stripe_customer_id);
+  const pm = !c.deleted && (c.invoice_settings?.default_payment_method || c.default_source);
+  if (!pm) {
     return page(res, 200, 'No card saved yet',
       '<p>Nothing changed. Use the link in your email again whenever you are ready.</p>');
   }
@@ -86,12 +88,18 @@ async function afterPortal(res, stripe, customer) {
     : null;
   const openInvoice = sub?.latest_invoice?.status === 'open' ? sub.latest_invoice : null;
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
+  const pmId = typeof pm === 'string' ? pm : pm.id;
 
-  if (sub?.status === 'paused' || sub?.status === 'past_due') {
+  if (['paused', 'past_due', 'unpaid'].includes(sub?.status)) {
     let paid = false;
     try {
+      // Pin the card just added, so Stripe doesn't charge an older card pinned on
+      // the subscription (provision pins the setup-fee card there).
+      if (sub.default_payment_method !== pmId) {
+        await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
+      }
       if (openInvoice) {
-        paid = (await stripe.invoices.pay(openInvoice.id)).status === 'paid';
+        paid = (await stripe.invoices.pay(openInvoice.id, { payment_method: pmId })).status === 'paid';
       } else {
         const resumed = await stripe.subscriptions.resume(sub.id, { billing_cycle_anchor: 'now' });
         paid = resumed.status === 'active';
@@ -101,13 +109,20 @@ async function afterPortal(res, stripe, customer) {
     }
     return paid
       ? page(res, 200, 'Card saved. Your tool is back on.',
-        `<p>The first month is paid. ${shop} takes estimate requests again within a minute or two.</p>`)
+        `<p>The payment went through. ${shop} takes estimate requests again within a minute or two.</p>`)
       : page(res, 200, 'Card saved, but the charge did not go through',
         `<p>Your card is on file, but the payment was declined or is still processing, so ${shop}
          stays paused for now. Try another card with the same link, or reply to any TreeSnap email.</p>`);
   }
+  if (sub?.status === 'trialing') {
+    return page(res, 200, 'Card saved',
+      '<p>Your tool keeps running when the trial ends. The first monthly charge happens on the trial end date.</p>');
+  }
+  if (sub?.status === 'active') {
+    return page(res, 200, 'Card saved', '<p>Future monthly charges will use this card.</p>');
+  }
   return page(res, 200, 'Card saved',
-    '<p>Your tool keeps running when the trial ends. The first monthly charge happens on the trial end date.</p>');
+    '<p>Your card is on file. This account is not active right now; reply to any TreeSnap email to restart it.</p>');
 }
 
 // "Email me a link" on a paused shop page. The response never says whether the
@@ -118,8 +133,7 @@ async function requestLink(req, res) {
   const subdomain = host.split('.')[0].toLowerCase();
 
   const ipLimit = await rateLimit({ bucket: 'billing_link_ip', identifier: clientIp(req), windowSeconds: 3600, max: 5 });
-  const subLimit = await rateLimit({ bucket: 'billing_link_sub', identifier: subdomain, windowSeconds: 86400, max: 3 });
-  if (!ipLimit.allowed || !subLimit.allowed) return res.status(200).json(generic);
+  if (!ipLimit.allowed) return res.status(200).json(generic);
 
   const { data: customer } = await supabase
     .from('customers')
@@ -132,8 +146,14 @@ async function requestLink(req, res) {
   if (customer?.email && customer.stripe_subscription_id && ['paused', 'past_due'].includes(customer.status)) {
     try {
       const sub = await getStripe().subscriptions.retrieve(customer.stripe_subscription_id);
-      if (['paused', 'past_due'].includes(sub.status)) {
-        await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
+      if (['paused', 'past_due', 'unpaid'].includes(sub.status)) {
+        // One send per shop per hour: the button is on a public page, so anyone
+        // can press it. Counted only when an email would actually go out, and
+        // fails closed (no send) if the limiter itself can't be reached.
+        const perShop = await rateLimit({ bucket: 'billing_link_send', identifier: customer.id, windowSeconds: 3600, max: 1 });
+        if (perShop.allowed && !perShop.error) {
+          await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
+        }
       }
     } catch (err) {
       console.error('Billing link request failed:', err.message);
