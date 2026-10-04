@@ -13,6 +13,9 @@ import { sendBillingLinkEmail } from '../lib/emails.js';
 // Update payment method + invoices, no cancel. Env override for test mode.
 const PORTAL_CONFIGURATION = process.env.STRIPE_PORTAL_CONFIGURATION || 'bpc_1UMrOKGTb7xBM80F1LABPaA1';
 
+const appUrl = () => process.env.APP_URL ?? 'https://app.treesnap.cloud';
+const linkParams = q => ({ c: q.c, e: q.e, s: q.s });
+
 function page(res, status, title, body) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
@@ -53,10 +56,7 @@ export default async function handler(req, res) {
     // Remember the card on file before the portal, so the return can tell
     // "added a card" from "left without changing anything".
     const before = (await defaultCardId(stripe, customer.stripe_customer_id)) || 'none';
-    const appUrl = process.env.APP_URL ?? 'https://app.treesnap.cloud';
-    const back = `${appUrl}/api/billing?${new URLSearchParams({
-      c: req.query.c, e: req.query.e, s: req.query.s, r: '1', p: before,
-    })}`;
+    const back = `${appUrl()}/api/billing?${new URLSearchParams({ ...linkParams(req.query), r: '1', p: before })}`;
     const session = await stripe.billingPortal.sessions.create({
       customer: customer.stripe_customer_id,
       configuration: PORTAL_CONFIGURATION,
@@ -87,17 +87,6 @@ async function afterPortal(res, stripe, customer, query = {}) {
     return page(res, 200, 'No card saved yet',
       '<p>Nothing changed. Use the link in your email again whenever you are ready.</p>');
   }
-  // Left the portal without changing the card: don't re-charge a card that may
-  // have just been declined. Offer an explicit retry instead.
-  if (query.p && query.p === pmId && query.retry !== '1') {
-    const appUrl = process.env.APP_URL ?? 'https://app.treesnap.cloud';
-    const base = { c: query.c, e: query.e, s: query.s };
-    const again = `${appUrl}/api/billing?${new URLSearchParams(base)}`;
-    const retry = `${appUrl}/api/billing?${new URLSearchParams({ ...base, r: '1', p: query.p, retry: '1' })}`;
-    return page(res, 200, 'No new card added',
-      `<p>Nothing was charged. <a href="${again}">Add a different card</a>, or if your bank has fixed
-       the problem, <a href="${retry}">try the card on file again</a>.</p>`);
-  }
   const sub = customer.stripe_subscription_id
     ? await stripe.subscriptions.retrieve(customer.stripe_subscription_id)
     : null;
@@ -118,6 +107,17 @@ async function afterPortal(res, stripe, customer, query = {}) {
     }
   }
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
+
+  // Past due / unpaid and the owner left the portal without changing the card
+  // that was declined: don't charge it again unasked. (Paused trials never had a
+  // charge declined, so they go straight through.)
+  if (['past_due', 'unpaid'].includes(sub.status) && query.p && query.p === pmId && query.retry !== '1') {
+    const again = `${appUrl()}/api/billing?${new URLSearchParams(linkParams(query))}`;
+    const retry = `${appUrl()}/api/billing?${new URLSearchParams({ ...linkParams(query), r: '1', p: query.p, retry: '1' })}`;
+    return page(res, 200, 'Your card on file was declined',
+      `<p>Nothing was charged. <a href="${again}">Add a different card</a>, or if your bank has fixed
+       the problem, <a href="${retry}">try the same card again</a>.</p>`);
+  }
 
   if (['paused', 'past_due', 'unpaid'].includes(sub.status)) {
     let outcome = 'failed';
@@ -193,19 +193,16 @@ async function chargeNow(stripe, sub, pmId) {
     // uncollectible by dunning); paying it is what reactivates the sub. Older
     // open invoices are for months the tool was off: mark them uncollectible so
     // they stay on record but are never charged.
-    const latest = sub.latest_invoice ? await stripe.invoices.retrieve(idOf(sub.latest_invoice)) : null;
-    const older = (await stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 }))
-      .data.filter(inv => inv.id !== latest?.id);
-    for (const inv of older) {
-      try {
-        await stripe.invoices.markUncollectible(inv.id);
-      } catch (err) {
-        console.error('Billing return: could not mark old invoice uncollectible:', inv.id, err.message);
-      }
-    }
+    const [latest, openList] = await Promise.all([
+      sub.latest_invoice ? stripe.invoices.retrieve(idOf(sub.latest_invoice)) : null,
+      stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 }),
+    ]);
     if (!latest || ['paid', 'void'].includes(latest.status)) return 'nothing';
-    if (await settle(latest)) return 'paid';
-    return needsAction ? { action: needsAction } : 'failed';
+    if (!(await settle(latest))) return needsAction ? { action: needsAction } : 'failed';
+    const older = openList.data.filter(inv => inv.id !== latest.id);
+    await Promise.all(older.map(inv => stripe.invoices.markUncollectible(inv.id).catch(err =>
+      console.error('Billing return: could not mark old invoice uncollectible:', inv.id, err.message))));
+    return 'paid';
   }
 
   // Paused: drafts a previous return left unfinalized, plus any stray open invoice.
@@ -223,6 +220,7 @@ async function chargeNow(stripe, sub, pmId) {
     charged = true;
   }
 
+  // Paused: resume (paying a stray invoice above does not unpause a sub).
   {
     // Paying a stray invoice does not unpause a sub; only resume does. Resuming
     // creates the first invoice but doesn't charge it (open or draft,
