@@ -21,16 +21,22 @@ const stormRun = () => ({
 test('storm damage keeps only cleanup-scope work in the total', () => {
   const e = enforceScope(stormRun(), 'storm_damage', { minimum_job: 350 });
   assert.deepEqual(e.line_items.map(i => i.scope), ['cleanup', 'haul']);
-  assert.equal(e.total_low, 1000);
-  assert.equal(e.total_high, 1450);
+  assert.deepEqual([e.total_low, e.total_high], [1000, 1450]);
   assert.match(e.notes, /Not included in this estimate: Complete hazard tree removal — standing trunk; Stump grinding/);
 });
 
 test('no emergency wording or pricing outside the emergency service', () => {
   const e = enforceScope(stormRun(), 'storm_damage', {});
   assert.doesNotMatch(e.notes, /emergency (service )?rates/i);
+  assert.match(e.notes, /^This tree has suffered catastrophic failure\. Complete removal/);
   assert.ok(e.line_items.every(i => !/^emergency/i.test(i.description)));
   assert.equal(e.line_items[0].description[0], 'S');
+});
+
+test('a decimal elsewhere in the notes survives the emergency scrub', () => {
+  const e = enforceScope({ notes: 'Clean break on a 1.5 ft limb. Emergency rates of 1.5x do not apply here. Haul included.',
+    line_items: [{ description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 }] }, 'storm_damage', {});
+  assert.match(e.notes, /^Clean break on a 1\.5 ft limb\. Haul included\./);
 });
 
 test('emergency multiplier is applied by code, only for the emergency service', () => {
@@ -42,17 +48,49 @@ test('emergency multiplier is applied by code, only for the emergency service', 
   assert.deepEqual([rm.total_low, rm.total_high], [1000, 2000]);
 });
 
-test('totals are recomputed from line items and respect the minimum job', () => {
+test('minimum job raises the total and says so; default minimum matches the prompt', () => {
   const e = enforceScope({ notes: '', total_low: 9999, total_high: 99999,
-    line_items: [{ description: 'Prune one limb', scope: 'trimming', price_low: 150, price_high: 250 }] }, 'trimming', { minimum_job: 350 });
+    line_items: [{ description: 'Prune one limb', scope: 'trimming', price_low: 150, price_high: 250 }] }, 'trimming', {});
   assert.deepEqual([e.total_low, e.total_high], [350, 350]);
+  assert.match(e.notes, /minimum job is \$350/);
 });
 
-test('model followups and unscoped items land in notes, not the total', () => {
+test('a missing scope defaults to the service, never empties the estimate', () => {
+  const e = enforceScope({ notes: '', line_items: [{ description: 'Cut up and remove the downed limb', price_low: 500, price_high: 800 }] }, 'storm_damage', {});
+  assert.equal(e.line_items.length, 1);
+  assert.equal(e.line_items[0].scope, 'cleanup');
+  assert.deepEqual([e.total_low, e.total_high], [500, 800]);
+});
+
+test('if nothing is in scope, keep the model items rather than send $0', () => {
+  const e = enforceScope({ notes: 'Emergency rates apply.', total_low: 2000, total_high: 3000,
+    line_items: [{ description: 'Remove standing tree', scope: 'removal', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
+  assert.deepEqual([e.total_low, e.total_high], [2000, 3000]);
+  assert.equal(e.line_items.length, 1);
+  assert.equal(e.notes, '');
+});
+
+test('string prices are parsed; unpriced items go to followups', () => {
+  const e = enforceScope({ notes: '', line_items: [
+    { description: 'Haul', scope: 'haul', price_low: '$500', price_high: '1,200' },
+    { description: 'Mystery fee', scope: 'haul', price_low: null, price_high: 'call us' },
+  ] }, 'removal', {});
+  assert.deepEqual([e.line_items[0].price_low, e.line_items[0].price_high], [500, 1200]);
+  assert.match(e.notes, /Not included in this estimate: Mystery fee\./);
+});
+
+test('model followups and unknown scopes land in notes, not the total', () => {
   const e = enforceScope({ notes: 'Clean break.', recommended_followups: ['Cable the remaining co-dominant leader'],
     line_items: [{ description: 'Crown thinning', scope: 'trimming', price_low: 400, price_high: 600 },
                  { description: 'Mystery', scope: 'banana', price_low: 1, price_high: 2 }] }, 'trimming', {});
   assert.equal(e.line_items.length, 1);
   assert.match(e.notes, /Not included in this estimate: Cable the remaining co-dominant leader; Mystery\./);
   assert.equal(e.recommended_followups, undefined);
+});
+
+test('small prices are not rounded to $0 outside the emergency multiplier', () => {
+  const e = enforceScope({ notes: '', line_items: [
+    { description: 'Cleanup', scope: 'cleanup', price_low: 400, price_high: 600 },
+    { description: 'Disposal fee', scope: 'haul', price_low: 10, price_high: 12 }] }, 'storm_damage', {});
+  assert.deepEqual([e.line_items[1].price_low, e.line_items[1].price_high], [10, 12]);
 });

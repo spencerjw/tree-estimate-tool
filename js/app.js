@@ -95,7 +95,7 @@ photoInput.addEventListener('change', () => {
 
 function handleFiles(files) {
   const imageFiles = files.filter((f) => f.type.startsWith('image/'));
-  const remaining  = CONFIG.MAX_PHOTOS - selectedFiles.length;
+  const remaining  = CONFIG.MAX_PHOTOS - selectedFiles.length - pendingReads;
 
   if (remaining <= 0) {
     setPhotoError(`Maximum ${CONFIG.MAX_PHOTOS} photos allowed.`);
@@ -112,16 +112,23 @@ function handleFiles(files) {
   // Keep the order the photos were picked in. Pushing in each reader's onload
   // ordered them by read speed, so a smaller file jumped ahead of the tree shot
   // and became "Photo 1" in the lead email.
+  pendingReads += toAdd.length;
   Promise.all(toAdd.map((file) => new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => resolve({ file, dataUrl: e.target.result });
     reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);
   }))).then((items) => {
+    pendingReads -= toAdd.length;
     items.filter(Boolean).forEach((item) => selectedFiles.push(item));
+    if (items.some((item) => !item)) setPhotoError('One photo could not be read. Try a JPG or PNG.');
     renderPreviews();
   });
 }
+
+// Photos picked but still being read; counted so quick repeat picks can't
+// exceed MAX_PHOTOS while a batch is in flight.
+let pendingReads = 0;
 
 function renderPreviews() {
   photoPreviews.innerHTML = '';

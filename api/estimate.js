@@ -138,54 +138,84 @@ export const SERVICE_SCOPES = {
 };
 const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
 
-// Claims the model must not make about pricing outside the emergency service.
-const EMERGENCY_CLAIM = /[^.]*\bemergency (?:service )?(?:rate|rates|pricing|multiplier|surcharge|premium)[^.]*\.?\s*/gi;
+// A sentence in notes that claims emergency pricing. Matched per sentence, so a
+// decimal ("1.5 ft") elsewhere in the notes is never cut in half.
+const EMERGENCY_CLAIM = /\bemergency (?:service |response )?(?:rate|rates|pricing|multiplier|surcharge|premium)\b/i;
+const DEFAULT_MINIMUM_JOB = 350;
+const DEFAULT_SCOPE = { removal: 'removal', trimming: 'trimming', storm_damage: 'cleanup', emergency: 'removal' };
 
 const roundTo25 = n => Math.round(n / 25) * 25;
+const toPrice = v => Number(typeof v === 'string' ? v.replace(/[$,\s]/g, '') : v);
+const money = n => `$${Number(n).toLocaleString('en-US')}`;
+
+function stripEmergencyClaims(notes) {
+  return notes
+    .split(/(?<=[.!?])\s+(?=[A-Z"'(])/)
+    .filter(sentence => !EMERGENCY_CLAIM.test(sentence))
+    .join(' ')
+    .trim();
+}
 
 export function enforceScope(estimate, serviceType, config = {}) {
   const allowed = SERVICE_SCOPES[serviceType] ?? ALL_SCOPES;
   const isEmergency = serviceType === 'emergency';
   const mult = isEmergency ? Number(config.emergency_multiplier) || 1.5 : 1;
+  const original = Array.isArray(estimate.line_items) ? estimate.line_items : [];
 
   const kept = [];
   const followups = Array.isArray(estimate.recommended_followups)
     ? estimate.recommended_followups.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim())
     : [];
 
-  for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
-    const scope = String(item?.scope ?? '').toLowerCase();
-    const low = Number(item?.price_low ?? item?.low);
-    const high = Number(item?.price_high ?? item?.high);
+  for (const item of original) {
     let description = String(item?.description ?? '').trim();
-    if (!description || !Number.isFinite(low) || !Number.isFinite(high)) continue;
-
+    if (!description) continue;
+    const low = toPrice(item?.price_low ?? item?.low);
+    const high = toPrice(item?.price_high ?? item?.high);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) {
+      console.error('ESTIMATE ITEM UNPRICED:', JSON.stringify(item));
+      followups.push(description);
+      continue;
+    }
+    // A missing scope is the model forgetting the field, not out-of-scope work.
+    let scope = String(item?.scope ?? '').toLowerCase().trim();
+    if (!scope) scope = DEFAULT_SCOPE[serviceType] ?? 'other';
     if (!allowed.includes(scope)) {
       followups.push(description);
       continue;
     }
     if (!isEmergency) description = description.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase());
+    const lo = Math.min(low, high) * mult;
+    const hi = Math.max(low, high) * mult;
     kept.push({
       description,
       scope,
-      price_low:  roundTo25(Math.min(low, high) * mult),
-      price_high: roundTo25(Math.max(low, high) * mult),
+      price_low:  mult === 1 ? lo : roundTo25(lo),
+      price_high: mult === 1 ? hi : roundTo25(hi),
     });
   }
 
-  estimate.line_items = kept;
-  let totalLow = kept.reduce((t, i) => t + i.price_low, 0);
-  let totalHigh = kept.reduce((t, i) => t + i.price_high, 0);
-  const minimum = Number(config.minimum_job) || 0;
-  if (kept.length && minimum) {
-    totalLow = Math.max(totalLow, minimum);
-    totalHigh = Math.max(totalHigh, minimum);
+  if (!kept.length) {
+    // Never send a $0 estimate. Keep what the model priced and let the arborist
+    // judge it; log so the scope rules can be tuned on real cases.
+    console.error('ENFORCE SCOPE: nothing left in scope, keeping model items:', JSON.stringify({ serviceType, original }));
+    estimate.notes = typeof estimate.notes === 'string' && !isEmergency ? stripEmergencyClaims(estimate.notes) : estimate.notes;
+    delete estimate.recommended_followups;
+    return estimate;
   }
-  estimate.total_low = totalLow;
-  estimate.total_high = totalHigh;
+
+  estimate.line_items = kept;
+  const sumLow = kept.reduce((t, i) => t + i.price_low, 0);
+  const sumHigh = kept.reduce((t, i) => t + i.price_high, 0);
+  const minimum = Number(config.minimum_job) || DEFAULT_MINIMUM_JOB;
+  estimate.total_low = Math.max(sumLow, minimum);
+  estimate.total_high = Math.max(sumHigh, minimum);
 
   let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
-  if (!isEmergency) notes = notes.replace(EMERGENCY_CLAIM, ' ').replace(/\s{2,}/g, ' ').trim();
+  if (!isEmergency) notes = stripEmergencyClaims(notes);
+  if (sumLow < minimum) {
+    notes = `${notes}${notes ? ' ' : ''}The minimum job is ${money(minimum)}, so the total starts there.`;
+  }
   if (followups.length) {
     const list = [...new Set(followups)].join('; ');
     notes = `${notes}${notes ? ' ' : ''}Not included in this estimate: ${list}. An on-site visit will confirm whether any of it is needed.`;
@@ -215,7 +245,7 @@ function buildSystemPrompt(customer, config, serviceType) {
       ? `$${cfg.base_rate_trimming_low}–$${cfg.base_rate_trimming_high}`
       : 'regional market rate';
 
-  const minJob = cfg.minimum_job ? `$${cfg.minimum_job}` : '$350';
+  const minJob = `$${cfg.minimum_job || DEFAULT_MINIMUM_JOB}`;
   const scopes = (SERVICE_SCOPES[serviceType] ?? ALL_SCOPES).join(', ');
   const serviceZips = cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'all areas';
   const addOnsText = cfg.add_ons?.length
@@ -242,7 +272,11 @@ If no pricing config is set, use regional market rates for the zip code provided
 You respond ONLY with valid JSON — no markdown, no prose, no explanation outside the JSON.
 
 SCOPE. Price only the work the customer asked for. Every line item has a "scope",
-and for this request the allowed scopes are: ${scopes}. Work the photos suggest
+and for this request the allowed scopes are: ${scopes}.
+Scope meanings: "removal" = taking down a tree that is still standing.
+"cleanup" = cutting up and clearing wood that is already down, including a whole
+tree that has fallen, and cutting back torn stubs. "trimming" = pruning live
+limbs. "haul" = hauling debris away. "stump" = stump grinding. Work the photos suggest
 but the customer did not ask for (for example removing a standing tree when they
 asked for storm cleanup, or a stump they did not mention) goes in
 "recommended_followups" as a short plain phrase, never in line_items.
@@ -601,7 +635,7 @@ export default async function handler(req, res) {
 
     const message = await anthropic.messages.create({
       model:      'claude-sonnet-4-5',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system:     systemPrompt,
       messages: [{
         role: 'user',
