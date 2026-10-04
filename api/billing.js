@@ -108,10 +108,15 @@ async function afterPortal(res, stripe, customer, query = {}) {
   }
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
 
-  // Past due / unpaid and the owner left the portal without changing the card
-  // that was declined: don't charge it again unasked. (Paused trials never had a
-  // charge declined, so they go straight through.)
-  if (['past_due', 'unpaid'].includes(sub.status) && query.p && query.p === pmId && query.retry !== '1') {
+  // The owner left the portal without changing a card that was already declined:
+  // don't charge it again unasked. Past due / unpaid means a decline happened. A
+  // paused trial only counts if a charge on one of its open invoices failed (an
+  // earlier return's attempt); a first-time paused return goes straight through.
+  const unchanged = query.p && query.p === pmId && query.retry !== '1';
+  const declinedBefore = unchanged && (['past_due', 'unpaid'].includes(sub.status)
+    || (sub.status === 'paused'
+      && (await stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 10 })).data.some(i => i.attempt_count > 0)));
+  if (declinedBefore) {
     const again = `${appUrl()}/api/billing?${new URLSearchParams(linkParams(query))}`;
     const retry = `${appUrl()}/api/billing?${new URLSearchParams({ ...linkParams(query), r: '1', p: query.p, retry: '1' })}`;
     return page(res, 200, 'Your card on file was declined',
