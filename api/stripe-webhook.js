@@ -2,7 +2,7 @@
 // Requires bodyParser disabled so we can verify the raw request body.
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe, isNoCardTrial, trialDaysForCheckout } from '../lib/stripe.js';
+import { getStripe, hasCardOnFile, trialDaysForCheckout } from '../lib/stripe.js';
 import { billingLinkUrl } from '../lib/billing-link.js';
 import { provisionCustomer } from '../lib/provision.js';
 import {
@@ -133,7 +133,9 @@ export default async function handler(req, res) {
         const sub = event.data.object;
         const customer = await getCustomerByStripeId(sub.customer);
         if (customer && !isStaleSubscription(customer, sub)) {
-          const noCard = await isNoCardTrial(stripe, sub);
+          // No card on file -> "nothing will be charged" copy + a card link. Covers
+          // BETA30 trials and a paid signup whose card save failed (safety net).
+          const noCard = !(await hasCardOnFile(stripe, sub));
           await sendTrialEndingEmail(customer, {
             noCard,
             billingUrl: noCard ? billingLinkUrl(customer.id) : null,
@@ -185,14 +187,15 @@ export default async function handler(req, res) {
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
         const periodEnd = toIso(subPeriodEnd(sub));
-        if (isStaleSubscription(await getCustomerByStripeId(sub.customer), sub)) break;
+        const existing = await getCustomerByStripeId(sub.customer);
+        if (isStaleSubscription(existing, sub)) break;
 
         await supabase
           .from('customers')
           .update({ status: 'canceled', current_period_end: periodEnd, canceled_at: new Date().toISOString() })
           .eq('stripe_customer_id', sub.customer);
 
-        const customer = await getCustomerByStripeId(sub.customer);
+        const customer = existing ? { ...existing, status: 'canceled' } : null;
         if (customer) {
           await sendCancellationEmail({ ...customer, current_period_end: periodEnd });
           await logEmail(customer.id, 'cancellation', customer.email);
@@ -207,6 +210,9 @@ export default async function handler(req, res) {
         const invoice = event.data.object;
         const customer = await getCustomerByStripeId(invoice.customer);
         if (!customer) break;
+        // A $0 invoice is a trial start (incl. an admin re-trial), not a payment.
+        if (!invoice.amount_paid) break;
+        if (isStaleSubscription(customer, { id: invoiceSubscriptionId(invoice) })) break;
 
         let periodStart = null;
         let periodEnd = null;
@@ -240,6 +246,7 @@ export default async function handler(req, res) {
       // ----------------------------------------------------------------------
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
+        if (isStaleSubscription(await getCustomerByStripeId(invoice.customer), { id: invoiceSubscriptionId(invoice) })) break;
 
         await supabase
           .from('customers')

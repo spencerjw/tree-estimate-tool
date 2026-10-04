@@ -5,7 +5,7 @@
 // POST /api/billing              from a paused shop page: email the owner a fresh link
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe } from '../lib/stripe.js';
+import { getStripe, hasCardOnFile } from '../lib/stripe.js';
 import { billingLinkUrl, verifyBillingLink } from '../lib/billing-link.js';
 import { rateLimit, clientIp } from '../lib/rate-limit.js';
 import { sendBillingLinkEmail } from '../lib/emails.js';
@@ -29,11 +29,6 @@ async function loadCustomer(id) {
     .eq('id', id)
     .single();
   return data;
-}
-
-async function hasDefaultCard(stripe, stripeCustomerId) {
-  const c = await stripe.customers.retrieve(stripeCustomerId);
-  return !c.deleted && !!(c.invoice_settings?.default_payment_method || c.default_source);
 }
 
 export default async function handler(req, res) {
@@ -76,23 +71,40 @@ export default async function handler(req, res) {
   }
 }
 
-// Back from the portal. If the trial already paused for lack of a card and a card
-// is now on file, resume and bill now. Stripe charges the card; the webhook moves
-// the shop back to active once that invoice is paid.
+// Back from the portal with a card on file:
+//   paused (no-card trial ended) -> resume and bill now; if a resume is already
+//     waiting on its invoice (repeat visit), retry that invoice instead.
+//   past_due (renewal declined)   -> retry the open invoice with the new card.
+// The webhook moves the shop to active once the invoice is paid.
 async function afterPortal(res, stripe, customer) {
-  if (!(await hasDefaultCard(stripe, customer.stripe_customer_id))) {
+  if (!(await hasCardOnFile(stripe, customer.stripe_customer_id))) {
     return page(res, 200, 'No card saved yet',
       '<p>Nothing changed. Use the link in your email again whenever you are ready.</p>');
   }
   const sub = customer.stripe_subscription_id
-    ? await stripe.subscriptions.retrieve(customer.stripe_subscription_id)
+    ? await stripe.subscriptions.retrieve(customer.stripe_subscription_id, { expand: ['latest_invoice'] })
     : null;
-  if (sub?.status === 'paused') {
-    await stripe.subscriptions.resume(sub.id, { billing_cycle_anchor: 'now' });
-    return page(res, 200, 'Card saved. Your tool is turning back on.',
-      `<p>We are charging the first month now. As soon as it goes through,
-       <a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>
-       takes estimate requests again. If the card is declined, we will email you.</p>`);
+  const openInvoice = sub?.latest_invoice?.status === 'open' ? sub.latest_invoice : null;
+  const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
+
+  if (sub?.status === 'paused' || sub?.status === 'past_due') {
+    let paid = false;
+    try {
+      if (openInvoice) {
+        paid = (await stripe.invoices.pay(openInvoice.id)).status === 'paid';
+      } else {
+        const resumed = await stripe.subscriptions.resume(sub.id, { billing_cycle_anchor: 'now' });
+        paid = resumed.status === 'active';
+      }
+    } catch (err) {
+      console.error('Billing return: charge failed:', err.message);
+    }
+    return paid
+      ? page(res, 200, 'Card saved. Your tool is back on.',
+        `<p>The first month is paid. ${shop} takes estimate requests again within a minute or two.</p>`)
+      : page(res, 200, 'Card saved, but the charge did not go through',
+        `<p>Your card is on file, but the payment was declined or is still processing, so ${shop}
+         stays paused for now. Try another card with the same link, or reply to any TreeSnap email.</p>`);
   }
   return page(res, 200, 'Card saved',
     '<p>Your tool keeps running when the trial ends. The first monthly charge happens on the trial end date.</p>');
@@ -111,15 +123,20 @@ async function requestLink(req, res) {
 
   const { data: customer } = await supabase
     .from('customers')
-    .select('id, email, owner_name, status, stripe_customer_id')
+    .select('id, email, owner_name, status, stripe_customer_id, stripe_subscription_id')
     .eq('subdomain', subdomain)
     .single();
 
-  if (customer?.email && customer.stripe_customer_id && ['paused', 'past_due'].includes(customer.status)) {
+  // Only when Stripe agrees a card would fix it. An admin pause (DB-only) or a
+  // canceled shop gets nothing; adding a card would not turn those back on.
+  if (customer?.email && customer.stripe_subscription_id && ['paused', 'past_due'].includes(customer.status)) {
     try {
-      await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
+      const sub = await getStripe().subscriptions.retrieve(customer.stripe_subscription_id);
+      if (['paused', 'past_due'].includes(sub.status)) {
+        await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
+      }
     } catch (err) {
-      console.error('Billing link email failed:', err.message);
+      console.error('Billing link request failed:', err.message);
     }
   }
   return res.status(200).json(generic);

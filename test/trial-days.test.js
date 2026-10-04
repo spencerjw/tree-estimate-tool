@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { trialDaysForCheckout, isNoCardTrial, DEFAULT_TRIAL_DAYS } from '../lib/stripe.js';
+import { trialDaysForCheckout, hasCardOnFile, DEFAULT_TRIAL_DAYS } from '../lib/stripe.js';
 
 // sessions: id -> session as returned by retrieve(id, { expand: ['total_details.breakdown'] })
 function fakeStripe({ codes = {}, coupons = {}, sessions = {}, customers = {} } = {}) {
@@ -82,18 +82,28 @@ test('a Stripe lookup failure throws so the webhook is retried', async () => {
   await assert.rejects(trialDaysForCheckout(fakeStripe(), { id: 'gone' }));
 });
 
-test('isNoCardTrial', async () => {
+test('a code deleted after checkout (resource_missing) falls back to 14', async () => {
+  const stripe = fakeStripe({ sessions: { cs_1: viaBreakdown('promo_gone', null) } });
+  stripe.promotionCodes.retrieve = async () => {
+    throw Object.assign(new Error('No such promotion code'), { code: 'resource_missing' });
+  };
+  assert.equal(await trialDaysForCheckout(stripe, { id: 'cs_1' }), 14);
+});
+
+test('hasCardOnFile', async () => {
   const stripe = fakeStripe({
     customers: {
-      cus_card: { invoice_settings: { default_payment_method: 'pm_1' } },
-      cus_none: { invoice_settings: { default_payment_method: null } },
+      cus_card:   { invoice_settings: { default_payment_method: 'pm_1' } },
+      cus_source: { invoice_settings: {}, default_source: 'card_1' },
+      cus_none:   { invoice_settings: { default_payment_method: null } },
+      cus_del:    { deleted: true },
     },
   });
-  const pause = { end_behavior: { missing_payment_method: 'pause' } };
-  assert.equal(await isNoCardTrial(stripe, { trial_settings: pause, customer: 'cus_none' }), true);
-  assert.equal(await isNoCardTrial(stripe, { trial_settings: pause, customer: 'cus_card' }), false);
-  assert.equal(await isNoCardTrial(stripe, { trial_settings: pause, default_payment_method: 'pm', customer: 'cus_none' }), false);
-  // Paid signup whose card save failed: not configured to pause, keeps standard copy.
-  assert.equal(await isNoCardTrial(stripe, { trial_settings: { end_behavior: { missing_payment_method: 'create_invoice' } }, customer: 'cus_none' }), false);
-  await assert.rejects(isNoCardTrial(stripe, { trial_settings: pause, customer: 'cus_unknown' }));
+  assert.equal(await hasCardOnFile(stripe, { default_payment_method: 'pm', customer: 'cus_none' }), true);
+  assert.equal(await hasCardOnFile(stripe, { customer: 'cus_card' }), true);
+  assert.equal(await hasCardOnFile(stripe, { customer: 'cus_source' }), true);
+  assert.equal(await hasCardOnFile(stripe, { customer: 'cus_none' }), false);
+  assert.equal(await hasCardOnFile(stripe, { customer: 'cus_del' }), false);
+  assert.equal(await hasCardOnFile(stripe, 'cus_card'), true);
+  await assert.rejects(hasCardOnFile(stripe, { customer: 'cus_unknown' }));
 });
