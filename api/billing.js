@@ -5,7 +5,7 @@
 // POST /api/billing              from a paused shop page: email the owner a fresh link
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe } from '../lib/stripe.js';
+import { getStripe, defaultCardId } from '../lib/stripe.js';
 import { billingLinkUrl, verifyBillingLink } from '../lib/billing-link.js';
 import { rateLimit, clientIp } from '../lib/rate-limit.js';
 import { sendBillingLinkEmail } from '../lib/emails.js';
@@ -72,67 +72,84 @@ export default async function handler(req, res) {
   }
 }
 
-// Back from the portal with a card on file:
-//   paused (no-card trial ended) -> resume and bill now; if a resume is already
-//     waiting on its invoice (repeat visit), retry that invoice instead.
-//   past_due (renewal declined)   -> retry the open invoice with the new card.
+// Back from the portal. Pin the card just added on the subscription (a card pinned
+// there overrides the customer default, and provision pins the setup-fee card),
+// then, if the shop is down for billing, charge now:
+//   paused (no-card trial ended) -> resume once and pay its first invoice
+//   past_due / unpaid            -> pay the open invoice with the new card
 // The webhook moves the shop to active once the invoice is paid.
 async function afterPortal(res, stripe, customer) {
-  const c = await stripe.customers.retrieve(customer.stripe_customer_id);
-  const pm = !c.deleted && (c.invoice_settings?.default_payment_method || c.default_source);
-  if (!pm) {
+  const pmId = await defaultCardId(stripe, customer.stripe_customer_id);
+  if (!pmId) {
     return page(res, 200, 'No card saved yet',
       '<p>Nothing changed. Use the link in your email again whenever you are ready.</p>');
   }
   const sub = customer.stripe_subscription_id
-    ? await stripe.subscriptions.retrieve(customer.stripe_subscription_id, { expand: ['latest_invoice'] })
+    ? await stripe.subscriptions.retrieve(customer.stripe_subscription_id)
     : null;
-  const openInvoice = sub?.latest_invoice?.status === 'open' ? sub.latest_invoice : null;
+  if (!sub || ['canceled', 'incomplete_expired'].includes(sub.status)) {
+    return page(res, 200, 'Card saved',
+      '<p>Your card is on file. This account is not active right now; reply to any TreeSnap email to restart it.</p>');
+  }
+  if (sub.default_payment_method !== pmId) {
+    await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
+  }
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
-  const pmId = typeof pm === 'string' ? pm : pm.id;
 
-  if (['paused', 'past_due', 'unpaid'].includes(sub?.status)) {
-    let paid = false;
+  if (['paused', 'past_due', 'unpaid'].includes(sub.status)) {
+    let outcome = 'failed';
     try {
-      // Pin the card just added, so Stripe doesn't charge an older card pinned on
-      // the subscription (provision pins the setup-fee card there).
-      if (sub.default_payment_method !== pmId) {
-        await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
-      }
-      let invoice = openInvoice;
-      if (!invoice) {
-        // Resuming creates the first invoice but does not charge it (it comes
-        // back open, auto_advance off), and the sub stays paused until it's paid.
-        const resumed = await stripe.subscriptions.resume(sub.id, {
-          billing_cycle_anchor: 'now',
-          expand: ['latest_invoice'],
-        });
-        invoice = resumed.latest_invoice;
-        if (invoice?.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
-      }
-      if (invoice?.status === 'open') {
-        invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId });
-      }
-      paid = invoice?.status === 'paid';
+      outcome = await chargeNow(stripe, sub, pmId);
     } catch (err) {
       console.error('Billing return: charge failed:', err.message);
     }
-    return paid
-      ? page(res, 200, 'Card saved. Your tool is back on.',
-        `<p>The payment went through. ${shop} takes estimate requests again within a minute or two.</p>`)
-      : page(res, 200, 'Card saved, but the charge did not go through',
-        `<p>Your card is on file, but the payment was declined or is still processing, so ${shop}
-         stays paused for now. Try another card with the same link, or reply to any TreeSnap email.</p>`);
+    if (outcome === 'paid') {
+      return page(res, 200, 'Card saved. Your tool is back on.',
+        `<p>The payment went through. ${shop} takes estimate requests again within a minute or two.</p>`);
+    }
+    if (outcome === 'nothing') {
+      return page(res, 200, 'Card saved',
+        `<p>Your card is on file and there is nothing to charge right now. If ${shop} is still
+         not taking requests, reply to any TreeSnap email and we will sort it out.</p>`);
+    }
+    return page(res, 200, 'Card saved, but the charge did not go through',
+      `<p>Your card is on file, but the payment was declined or is still processing, so ${shop}
+       stays paused for now. Try another card with the same link, or reply to any TreeSnap email.</p>`);
   }
-  if (sub?.status === 'trialing') {
+  if (sub.status === 'trialing') {
     return page(res, 200, 'Card saved',
-      '<p>Your tool keeps running when the trial ends. The first monthly charge happens on the trial end date.</p>');
+      '<p>Your tool keeps running when the trial ends. The first monthly charge goes to this card on the trial end date.</p>');
   }
-  if (sub?.status === 'active') {
-    return page(res, 200, 'Card saved', '<p>Future monthly charges will use this card.</p>');
+  return page(res, 200, 'Card saved', '<p>Future monthly charges will use this card.</p>');
+}
+
+// Returns 'paid' | 'failed' | 'nothing'.
+async function chargeNow(stripe, sub, pmId) {
+  let invoice = (await stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 1 })).data[0];
+  if (!invoice && sub.status === 'paused') {
+    // Resuming creates the first invoice but doesn't charge it (open, auto_advance
+    // off) and the sub stays paused until it's paid. The key is per pause (the
+    // pre-resume latest invoice), so two overlapping returns resume once.
+    const resumed = await stripe.subscriptions.resume(
+      sub.id,
+      { billing_cycle_anchor: 'now', expand: ['latest_invoice'] },
+      { idempotencyKey: `treesnap-resume-${sub.id}-${typeof sub.latest_invoice === 'string' ? sub.latest_invoice : sub.latest_invoice?.id}` },
+    );
+    invoice = resumed.latest_invoice;
+    if (invoice?.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
   }
-  return page(res, 200, 'Card saved',
-    '<p>Your card is on file. This account is not active right now; reply to any TreeSnap email to restart it.</p>');
+  if (!invoice) return 'nothing';
+  if (invoice.status === 'open') {
+    try {
+      invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId },
+        { idempotencyKey: `treesnap-pay-${invoice.id}-${pmId}` });
+    } catch (err) {
+      // A concurrent return may have paid it already.
+      invoice = await stripe.invoices.retrieve(invoice.id);
+      if (invoice.status !== 'paid') throw err;
+    }
+  }
+  return invoice.status === 'paid' ? 'paid' : 'failed';
 }
 
 // "Email me a link" on a paused shop page. The response never says whether the
@@ -157,11 +174,14 @@ async function requestLink(req, res) {
     try {
       const sub = await getStripe().subscriptions.retrieve(customer.stripe_subscription_id);
       if (['paused', 'past_due', 'unpaid'].includes(sub.status)) {
-        // One send per shop per hour: the button is on a public page, so anyone
-        // can press it. Counted only when an email would actually go out, and
+        // One send per shop per hour, three per day: the button is on a public
+        // page, so anyone can press it. Counted only when an email would actually go out, and
         // fails closed (no send) if the limiter itself can't be reached.
         const perShop = await rateLimit({ bucket: 'billing_link_send', identifier: customer.id, windowSeconds: 3600, max: 1 });
-        if (perShop.allowed && !perShop.error) {
+        const perDay = perShop.allowed && !perShop.error
+          ? await rateLimit({ bucket: 'billing_link_send_day', identifier: customer.id, windowSeconds: 86400, max: 3 })
+          : { allowed: false };
+        if (perShop.allowed && !perShop.error && perDay.allowed && !perDay.error) {
           await sendBillingLinkEmail(customer, billingLinkUrl(customer.id));
         }
       }

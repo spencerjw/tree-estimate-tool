@@ -2,7 +2,7 @@
 // Requires bodyParser disabled so we can verify the raw request body.
 
 import { supabase } from '../lib/supabase.js';
-import { getStripe, hasCardOnFile, trialDaysForCheckout } from '../lib/stripe.js';
+import { getStripe, hasCardOnFile, trialDaysForCheckout, MONTHLY_PRICE_IDS, PRICE_TO_TIER } from '../lib/stripe.js';
 import { billingLinkUrl } from '../lib/billing-link.js';
 import { provisionCustomer } from '../lib/provision.js';
 import {
@@ -18,21 +18,8 @@ export const config = {
   api: { bodyParser: false },
 };
 
-// Stripe monthly price ID → TreeSnap tier (also used for upgrade swaps)
-const MONTHLY_PRICE_IDS = {
-  starter: 'price_1TUradGTb7xBM80FK2OjcI5D',  // $79/mo
-  pro:     'price_1TUracGTb7xBM80FNCyGv4Hp',  // $129/mo
-  proplus: 'price_1TUrafGTb7xBM80FVV4J21Cr',  // $179/mo
-};
-
 const TIER_LABELS = { starter: 'Starter', pro: 'Pro', proplus: 'Pro+' };
 
-// Stripe price ID → TreeSnap tier
-const PRICE_TO_TIER = {
-  'price_1TUradGTb7xBM80FK2OjcI5D': 'starter',  // $79/mo
-  'price_1TUracGTb7xBM80FNCyGv4Hp': 'pro',       // $129/mo
-  'price_1TUrafGTb7xBM80FVV4J21Cr': 'proplus',   // $179/mo
-};
 
 // Stripe subscription status → TreeSnap status
 const STATUS_MAP = {
@@ -239,8 +226,16 @@ export default async function handler(req, res) {
         // trial converted at its end or a paused no-card trial resumed with a card.
         // Decided from Stripe's invoice history, not the DB status: Stripe can send
         // subscription.updated (already active) before this event.
-        const paid = await stripe.invoices.list({ customer: invoice.customer, status: 'paid', limit: 100 });
-        const isFirstCharge = !paid.data.some(i => i.id !== invoice.id && i.amount_paid > 0);
+        // Once a start email is logged, every later invoice is a renewal: skip the
+        // Stripe lookup. (DB status can't tell: Stripe may mark the sub active
+        // before this event arrives.)
+        const { data: startedLog } = await supabase
+          .from('email_log').select('id')
+          .eq('customer_id', customer.id).eq('email_type', 'subscription_started').limit(1)
+          .maybeSingle();
+        const isFirstCharge = !startedLog && !(await stripe.invoices.list({
+          customer: invoice.customer, status: 'paid', limit: 100,
+        })).data.some(i => i.id !== invoice.id && i.amount_paid > 0);
         if (isFirstCharge) {
           const amountPaid = Math.round(invoice.amount_paid / 100);
           await sendSubscriptionStartedEmail(
