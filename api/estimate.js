@@ -117,9 +117,91 @@ function isDemoHost(host) {
 }
 
 // ---------------------------------------------------------------------------
+// Scope and pricing rules
+//
+// The model used to price whatever it imagined: a storm-damage request for one
+// dropped limb came back as "Complete hazard tree removal" + stump grinding with
+// "Emergency service rates applied" (2026-10-04), the same worst-case pattern as
+// Matt Roberts' runs (crane, power lines, flat 50-60 ft; 2026-09-10). These are
+// enforced here, not only asked for in the prompt:
+//   - a line item is priced only if its scope belongs to the requested service;
+//     anything else becomes a "not included" follow-up, outside the total
+//   - the emergency multiplier is applied by this code, and only on the
+//     emergency service; the model prices everything at standard rates
+//   - totals are recomputed from the line items, with the minimum job applied
+// ---------------------------------------------------------------------------
+export const SERVICE_SCOPES = {
+  removal:      ['removal', 'stump', 'haul', 'cleanup'],
+  trimming:     ['trimming', 'haul', 'cleanup'],
+  storm_damage: ['cleanup', 'haul', 'trimming'],
+  emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump'],
+};
+const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
+
+// Claims the model must not make about pricing outside the emergency service.
+const EMERGENCY_CLAIM = /[^.]*\bemergency (?:service )?(?:rate|rates|pricing|multiplier|surcharge|premium)[^.]*\.?\s*/gi;
+
+const roundTo25 = n => Math.round(n / 25) * 25;
+
+export function enforceScope(estimate, serviceType, config = {}) {
+  const allowed = SERVICE_SCOPES[serviceType] ?? ALL_SCOPES;
+  const isEmergency = serviceType === 'emergency';
+  const mult = isEmergency ? Number(config.emergency_multiplier) || 1.5 : 1;
+
+  const kept = [];
+  const followups = Array.isArray(estimate.recommended_followups)
+    ? estimate.recommended_followups.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim())
+    : [];
+
+  for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
+    const scope = String(item?.scope ?? '').toLowerCase();
+    const low = Number(item?.price_low ?? item?.low);
+    const high = Number(item?.price_high ?? item?.high);
+    let description = String(item?.description ?? '').trim();
+    if (!description || !Number.isFinite(low) || !Number.isFinite(high)) continue;
+
+    if (!allowed.includes(scope)) {
+      followups.push(description);
+      continue;
+    }
+    if (!isEmergency) description = description.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase());
+    kept.push({
+      description,
+      scope,
+      price_low:  roundTo25(Math.min(low, high) * mult),
+      price_high: roundTo25(Math.max(low, high) * mult),
+    });
+  }
+
+  estimate.line_items = kept;
+  let totalLow = kept.reduce((t, i) => t + i.price_low, 0);
+  let totalHigh = kept.reduce((t, i) => t + i.price_high, 0);
+  const minimum = Number(config.minimum_job) || 0;
+  if (kept.length && minimum) {
+    totalLow = Math.max(totalLow, minimum);
+    totalHigh = Math.max(totalHigh, minimum);
+  }
+  estimate.total_low = totalLow;
+  estimate.total_high = totalHigh;
+
+  let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
+  if (!isEmergency) notes = notes.replace(EMERGENCY_CLAIM, ' ').replace(/\s{2,}/g, ' ').trim();
+  if (followups.length) {
+    const list = [...new Set(followups)].join('; ');
+    notes = `${notes}${notes ? ' ' : ''}Not included in this estimate: ${list}. An on-site visit will confirm whether any of it is needed.`;
+  }
+  if (isEmergency && mult !== 1) {
+    notes = `${notes}${notes ? ' ' : ''}Emergency response pricing (${mult}x standard rates) is included.`;
+  }
+  estimate.notes = notes;
+  delete estimate.recommended_followups;
+  return estimate;
+}
+
+// ---------------------------------------------------------------------------
 // Build customer-aware system prompt
 // ---------------------------------------------------------------------------
-function buildSystemPrompt(customer, config) {
+function buildSystemPrompt(customer, config, serviceType) {
   const businessName = customer.business_name || customer.company_name || 'this tree service company';
   const cfg = config ?? {};
 
@@ -134,7 +216,7 @@ function buildSystemPrompt(customer, config) {
       : 'regional market rate';
 
   const minJob = cfg.minimum_job ? `$${cfg.minimum_job}` : '$350';
-  const emergencyMult = cfg.emergency_multiplier ?? 1.5;
+  const scopes = (SERVICE_SCOPES[serviceType] ?? ALL_SCOPES).join(', ');
   const serviceZips = cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'all areas';
   const addOnsText = cfg.add_ons?.length
     ? cfg.add_ons.map(a => `${a.name} ($${a.low}–$${a.high})`).join(', ')
@@ -149,13 +231,37 @@ PRICING GUIDELINES FOR THIS COMPANY:
 - Tree removal: ${removalRange} base range
 - Trimming/pruning: ${trimmingRange} base range
 - Minimum job: ${minJob}
-- Emergency service multiplier: ${emergencyMult}x standard rates${marketLine}
+- Price every line at STANDARD rates. Never apply an emergency, storm, or rush
+  multiplier yourself and never mention emergency rates; the system applies any
+  surcharge after you answer.${marketLine}
 - Service area zip codes: ${serviceZips}
 - Available add-ons: ${addOnsText}
 
 If no pricing config is set, use regional market rates for the zip code provided.
 
 You respond ONLY with valid JSON — no markdown, no prose, no explanation outside the JSON.
+
+SCOPE. Price only the work the customer asked for. Every line item has a "scope",
+and for this request the allowed scopes are: ${scopes}. Work the photos suggest
+but the customer did not ask for (for example removing a standing tree when they
+asked for storm cleanup, or a stump they did not mention) goes in
+"recommended_followups" as a short plain phrase, never in line_items.
+
+EVIDENCE. A certified arborist reads this. Every complexity factor and safety
+concern must be something visible in these photos. Do not assume power lines, a
+crane, structures, decay, or access limits you cannot see. One broken limb on a
+tree that is otherwise standing is a cleanup job, not a catastrophe.
+
+CONDITION, chosen strictly:
+- Healthy: no visible defects.
+- Fair: minor defects, or one failed limb on an otherwise sound tree.
+- Poor: multiple defects, significant dieback, or visible decay in the trunk.
+- Hazardous: failure of what is still standing looks likely soon AND a target
+  (house, vehicle, road, people) is within reach. Damage alone is not hazardous.
+
+HEIGHT. Estimate from what is in frame. If the top of the tree is not visible or
+there is nothing to judge scale by, give a wide range and say so in notes rather
+than a confident number.
 
 When analyzing photos, assess:
 1. Tree species, with an honest confidence percentage
@@ -192,10 +298,12 @@ Return a JSON object with this exact structure — all fields required:
   "line_items": [
     {
       "description": "string — plain-English line item label",
+      "scope": "one of: removal | trimming | cleanup | haul | stump | other",
       "price_low": number,
       "price_high": number
     }
   ],
+  "recommended_followups": ["array of short phrases for work outside the requested scope — [] if none"],
   "total_low": number,
   "total_high": number,
   "notes": "string — 1–2 sentences with any important context or caveats for the customer"
@@ -489,7 +597,7 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     // 5. Phase 2 — generate estimate
     // -----------------------------------------------------------------------
-    const systemPrompt = buildSystemPrompt(customer, customerConfig);
+    const systemPrompt = buildSystemPrompt(customer, customerConfig, serviceType);
 
     const message = await anthropic.messages.create({
       model:      'claude-sonnet-4-5',
@@ -515,6 +623,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
     applySpeciesGate(estimate);
+    enforceScope(estimate, serviceType, customerConfig ?? {});
 
     const lead = { name, email, phone, zip, serviceType, timestamp: new Date().toISOString() };
 

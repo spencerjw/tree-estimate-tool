@@ -109,13 +109,17 @@ function handleFiles(files) {
     setPhotoError('');
   }
 
-  toAdd.forEach((file) => {
+  // Keep the order the photos were picked in. Pushing in each reader's onload
+  // ordered them by read speed, so a smaller file jumped ahead of the tree shot
+  // and became "Photo 1" in the lead email.
+  Promise.all(toAdd.map((file) => new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      selectedFiles.push({ file, dataUrl: e.target.result });
-      renderPreviews();
-    };
+    reader.onload = (e) => resolve({ file, dataUrl: e.target.result });
+    reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);
+  }))).then((items) => {
+    items.filter(Boolean).forEach((item) => selectedFiles.push(item));
+    renderPreviews();
   });
 }
 
