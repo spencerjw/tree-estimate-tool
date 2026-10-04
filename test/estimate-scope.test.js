@@ -66,7 +66,7 @@ test('if nothing is in scope, quote an assessment at the minimum and list the re
   const e = enforceScope({ notes: 'Emergency rates apply.', total_low: 2000, total_high: 3000,
     line_items: [{ description: 'Remove standing tree', scope: 'removal', price_low: 2000, price_high: 3000 }] }, 'storm_damage', {});
   assert.deepEqual([e.total_low, e.total_high], [350, 350]);
-  assert.equal(e.line_items[0].description, 'Minimum job charge, exact price set at your free on-site visit');
+  assert.equal(e.line_items[0].description, 'Starting price, exact price set at your free on-site visit');
   assert.match(e.notes, /Not included in this estimate: Remove standing tree\./);
   assert.doesNotMatch(e.notes, /Emergency rates/);
 });
@@ -228,8 +228,26 @@ test('emergency fallback applies the multiplier its note claims', () => {
   assert.match(e.notes, /1\.5x standard rates/);
 });
 
-test('emergency notes keep the model safety sentence', () => {
-  const e = enforceScope({ notes: 'Emergency service rates apply because the limb is on the roof; keep people out of the back bedroom.',
+test('emergency notes: the model rate claim is removed, only the code surcharge line remains', () => {
+  const e = enforceScope({ notes: 'Limb is on the roof. Emergency rates (2x) have been applied to all line items.',
     line_items: [{ description: 'Remove limb from roof', scope: 'cleanup', price_low: 800, price_high: 1200 }] }, 'emergency', { emergency_multiplier: 1.5 });
-  assert.match(e.notes, /keep people out of the back bedroom/);
+  assert.equal(e.notes, 'Limb is on the roof. Emergency response pricing (1.5x standard rates) is included.');
+});
+
+test('other: removal permits, disposal fees and configured add-ons are priced; crane is not', () => {
+  const e = enforceScope({ notes: '', line_items: [
+    { description: 'Remove tree', scope: 'removal', price_low: 1000, price_high: 2000 },
+    { description: 'City tree removal permit', scope: 'other', price_low: 50, price_high: 100 },
+    { description: 'Debris removal and disposal fee', scope: 'other', price_low: 100, price_high: 150 },
+    { description: 'Stump grinding add-on', scope: 'other', price_low: 150, price_high: 250 },
+    { description: 'Crane rental fee', scope: 'other', price_low: 1500, price_high: 2500 }] }, 'removal', { add_ons: [{ name: 'Stump grinding' }] });
+  assert.deepEqual([e.total_low, e.total_high], [1300, 2500]);
+  assert.match(e.notes, /Not included in this estimate: Crane rental fee\./);
+});
+
+test('street and place names with tree words survive the scrub', () => {
+  const e = applySpeciesGate({ species: 'Unable to determine', species_confidence: 0,
+    notes: 'Access from Oak Hills Dr. Serving Cypress Creek and Live Oak, TX.',
+    line_items: [{ description: 'Cleanup', price_low: 1, price_high: 2 }] });
+  assert.equal(e.notes, 'Access from Oak Hills Dr. Serving Cypress Creek and Live Oak, TX.');
 });

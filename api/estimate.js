@@ -113,7 +113,13 @@ export function applySpeciesGate(estimate) {
 const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*(?:tx|texas))\b/gi;
 // Texas place names that contain a tree word. An explicit list, case-sensitive:
 // a pattern would also protect title-case line items like "Pecan Branch Cleanup".
-const PLACE_NAMES = /\b(?:Cedar Park|Cedar Hill|Cedar Creek|Oak Hill|Oak Cliff|Oak Ridge|Oak Point|Shavano Park|Pecan Valley|Elm Creek|Pine Bluff|Willow Park|Walnut Springs|Live Oak County|City of Live Oak)\b/g;
+const PLACE_NAMES = new RegExp(
+  '\\b(?:Cedar Park|Cedar Hill|Oak Cliff|Shavano Park|Live Oak County|City of Live Oak|Live Oak, (?:TX|Texas)' +
+  // A tree word followed by a place or street word: "Oak Hills Dr", "Cypress Creek".
+  '|(?:Live Oak|Cedar|Oak|Pecan|Elm|Pine|Cypress|Walnut|Willow|Magnolia|Hickory|Mesquite)\\s+' +
+  '(?:Hills?|Creek|Park|Valley|Grove|Springs?|Heights|Village|Ridge|Cliff|Bluff|Point|Lake|Dr|Drive|Rd|Road|St|Street|Ln|Lane|Blvd|Ave|Trail|Way|Pkwy))\\b',
+  'g',
+);
 
 const SPECIES_HEADS = 'oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|' +
   'willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|' +
@@ -211,13 +217,16 @@ export const SERVICE_SCOPES = {
   storm_damage: ['cleanup', 'haul', 'trimming', 'other'],
   emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump', 'other'],
 };
+// Order matters: the shop's own add-ons are always priced; fee-type lines are
+// priced unless they are crane/bucket-truck equipment; anything else tagged
+// "other" (e.g. an untagged tree removal) is not.
 const OTHER_FEE = /\b(permit|travel|trip|disposal|dump|chipping|chips?|mulch|fee)\b/i;
-const NOT_OTHER = /\b(crane|remov|take ?down|fell|stump|grind|bucket truck|climb)/i;
+const EQUIPMENT = /\b(crane|bucket truck)\b/i;
 function isAllowedOther(description, config) {
-  if (NOT_OTHER.test(description)) return false;
   const addOns = Array.isArray(config?.add_ons) ? config.add_ons : [];
   const d = description.toLowerCase();
-  return OTHER_FEE.test(description) || addOns.some(a => a?.name && d.includes(String(a.name).toLowerCase()));
+  if (addOns.some(a => a?.name && d.includes(String(a.name).toLowerCase()))) return true;
+  return OTHER_FEE.test(description) && !EQUIPMENT.test(description);
 }
 const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
 
@@ -312,7 +321,7 @@ export function enforceScope(estimate, serviceType, config = {}) {
     // needs a starting number, so the default stands in.
     const min = (resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB) * mult;
     kept.push({
-      description: 'Minimum job charge, exact price set at your free on-site visit',
+      description: 'Starting price, exact price set at your free on-site visit',
       scope: DEFAULT_SCOPE[serviceType] ?? 'other',
       price_low: mult === 1 ? min : roundTo25(min),
       price_high: mult === 1 ? min : roundTo25(min),
@@ -333,10 +342,9 @@ export function enforceScope(estimate, serviceType, config = {}) {
   estimate.total_high = Math.max(sumHigh, minimum);
 
   let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
-  // Outside the emergency service the model's emergency-pricing claims are
-  // removed. On the emergency service its sentences stay (they can carry safety
-  // instructions); the code's own surcharge line is the authoritative one.
-  if (!isEmergency) notes = stripEmergencyClaims(notes);
+  // The model's own emergency-pricing claims are removed on every service; the
+  // code's surcharge line is the only one. (Safety concerns have their own list.)
+  notes = stripEmergencyClaims(notes);
   if (sumLow < minimum) {
     notes = `${notes}${notes ? ' ' : ''}The minimum job is ${money(minimum)}, so the total starts there.`;
   }
@@ -793,7 +801,12 @@ export default async function handler(req, res) {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
-    if (!estimate || typeof estimate !== 'object' || Array.isArray(estimate) || !Array.isArray(estimate.line_items)) {
+    // A refusal or error object (no estimate fields at all) is a failed estimate.
+    // A real estimate that only lacks line_items goes on to the fallback, so the
+    // lead is kept.
+    const looksLikeEstimate = estimate && typeof estimate === 'object' && !Array.isArray(estimate)
+      && (Array.isArray(estimate.line_items) || estimate.condition || estimate.estimated_height);
+    if (!looksLikeEstimate) {
       console.error('Claude returned JSON that is not an estimate object:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
