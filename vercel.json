@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/cleanup-demo",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/trial-notices",
+      "schedule": "0 14 * * *"
     }
   ],
   "routes": [
