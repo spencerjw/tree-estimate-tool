@@ -61,7 +61,7 @@ const NON_ANSWER = /unidentif|unable to (determine|identify)|not (determinable|c
 // hedge word but tells an arborist nothing he did not already know.
 const CATEGORY_ONLY = /^(?:(?:a|an|the|large|small|young|mature|native|common|deciduous|evergreen|broad-?leaf(?:ed)?|conifer(?:ous)?|hardwood|softwood|shade|ornamental|fruit|tree|shrub|species|type)\s*)+$/i;
 
-function applySpeciesGate(estimate) {
+export function applySpeciesGate(estimate) {
   const rawName = typeof estimate?.species === 'string' ? estimate.species.trim() : null;
   const rawPct  = estimate?.species_confidence ?? null;
 
@@ -98,8 +98,87 @@ function applySpeciesGate(estimate) {
     }
     estimate.species = 'Not determinable from photos';
     estimate.species_confidence = null;
+    scrubSuppressedSpecies(estimate, rawName);
   }
   return estimate;
+}
+
+// When the gate hides the species, no species name may appear anywhere else in
+// the estimate (2026-10-04: "Not determinable from photos" next to a line item
+// reading "storm-damaged cedar elm").
+//
+// Arborist terms that contain a tree name are set aside first and restored after,
+// so "oak wilt", "southern pine beetle", "Dutch elm disease" or a "cedar fence"
+// are never rewritten.
+const PROTECTED_TERMS = /\b(?:(?:texas\s+)?oak\s+wilt|(?:southern|mountain|western|ips)?\s*pine\s+(?:beetles?|bark\s+beetles?)|pine\s+wilt|dutch\s+elm\s+disease|elm\s+(?:leaf\s+)?beetles?|emerald\s+ash\s+borers?|ash\s+borers?|(?:red\s+)?cedar\s+(?:privacy\s+)?(?:fence|fencing|lumber|posts?|boards?|pickets?|siding|mulch|shingles?)|pine\s+(?:straw|needles?\s+mulch)|live\s+oak,\s*(?:tx|texas))\b/gi;
+// Texas place names that contain a tree word. An explicit list, case-sensitive:
+// a pattern would also protect title-case line items like "Pecan Branch Cleanup".
+const PLACE_NAMES = new RegExp(
+  '\\b(?:Cedar Park|Cedar Hill|Oak Cliff|Shavano Park|Live Oak County|City of Live Oak|Live Oak, (?:TX|Texas)' +
+  // A tree word followed by a place or street word: "Oak Hills Dr", "Cypress Creek".
+  '|(?:Live Oak|Cedar|Oak|Pecan|Elm|Pine|Cypress|Walnut|Willow|Magnolia|Hickory|Mesquite)\\s+' +
+  '(?:Hills?|Creek|Park|Valley|Grove|Springs?|Heights|Village|Ridge|Cliff|Bluff|Point|Lake|Dr|Drive|Rd|Road|St|Street|Ln|Lane|Blvd|Ave|Trail|Way|Pkwy))\\b',
+  'g',
+);
+
+const SPECIES_HEADS = 'oak|elm|maple|ash|pine|cypress|cedar|pecan|hackberry|mesquite|juniper|sycamore|cottonwood|' +
+  'willow|magnolia|walnut|hickory|sweetgum|redbud|myrtle|palm|birch|poplar|locust|mulberry|chinaberry|ligustrum|' +
+  'pistache|tallow|laurel|pear|bois d\'arc';
+const SPECIES_QUALIFIERS = 'american|cedar|chinese|siberian|lacebark|winged|slippery|live|post|red|white|water|' +
+  'shumard|bur|pin|laurel|texas|lacey|chinkapin|blackjack|spanish|mountain|desert|bigtooth|silver|sugar|bald|' +
+  'loblolly|slash|longleaf|shortleaf|eastern|ashe|green|arizona|mexican|bradford|callery|crape|southern|sweet|' +
+  'black|honey|common|cherry';
+// Qualifiers are optional: a bare "Oak" or "Pecan" is a species call too.
+const SPECIES_MENTION = new RegExp(
+  `\\b(?:(?:${SPECIES_QUALIFIERS})\\s+){0,2}(?:${SPECIES_HEADS})(s|es)?(\\s+trees?)?\\b`, 'gi');
+// A botanical name in parentheses: "(Quercus virginiana)".
+const BOTANICAL = /\s*\((?:[A-Z][a-z]+\s+[a-z]+(?:\s+(?:var\.|subsp\.)\s+[a-z]+)?)\)/g;
+// Advice that only makes sense if the species call were right.
+const SPECIES_ADVICE = /\boak\s+wilt\b/i;
+
+// Capitalize only at the start of a sentence: "Oak removal" -> "Tree removal",
+// but "Remove Chinese tallow" -> "Remove tree".
+const keepCase = (str, offset, word) =>
+  (offset === 0 || /[.!?\n]\s*$/.test(str.slice(0, offset)) ? word[0].toUpperCase() + word.slice(1) : word);
+
+function scrubText(text, rawName) {
+  const saved = [];
+  const keep = m => `\u0000${saved.push(m) - 1}\u0000`;
+  let out = text.replace(PROTECTED_TERMS, keep).replace(PLACE_NAMES, keep);
+  out = out.replace(BOTANICAL, '');
+  if (rawName && rawName.length >= 3) {
+    const esc = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(?<![\\w])${esc}(?![\\w])`, 'gi'), (_m, offset, str) => keepCase(str, offset, 'tree'));
+  }
+  out = out.replace(SPECIES_MENTION, (_m, plural, treeWord, offset, str) =>
+    keepCase(str, offset, plural || (treeWord && /trees$/i.test(treeWord)) ? 'trees' : 'tree'));
+  out = out
+    .replace(/\btrees?(?:\s+trees?)+\b/gi, m => (/s$/i.test(m) ? 'trees' : 'tree'))
+    .replace(/\b(a|A)n (trees?)\b/g, '$1 $2')
+    .replace(/\u0000(\d+)\u0000/g, (_m, i) => saved[Number(i)])
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  return out.replace(/^[a-z]/, c => (/^[A-Z]/.test(text.trim()) ? c.toUpperCase() : c));
+}
+
+function dropSpeciesAdvice(notes) {
+  return notes
+    .split(/\n/)
+    .map(para => para.split(/(?<=[.!?])\s+(?=\S)/).filter(s => !SPECIES_ADVICE.test(s)).join(' '))
+    .join('\n')
+    .trim();
+}
+
+function scrubSuppressedSpecies(estimate, rawName) {
+  const raw = (rawName || '').trim();
+  const name = raw.length >= 3 && !NON_ANSWER.test(raw) && !CATEGORY_ONLY.test(raw) ? raw : null;
+  for (const item of Array.isArray(estimate.line_items) ? estimate.line_items : []) {
+    if (typeof item?.description === 'string') item.description = scrubText(item.description, name);
+  }
+  for (const key of ['recommended_followups', 'complexity_factors', 'safety_concerns']) {
+    if (Array.isArray(estimate[key])) estimate[key] = estimate[key].map(x => (typeof x === 'string' ? scrubText(x, name) : x));
+  }
+  if (typeof estimate.notes === 'string') estimate.notes = scrubText(dropSpeciesAdvice(estimate.notes), name);
 }
 
 function extractSubdomain(host) {
@@ -117,9 +196,174 @@ function isDemoHost(host) {
 }
 
 // ---------------------------------------------------------------------------
+// Scope and pricing rules
+//
+// The model used to price whatever it imagined: a storm-damage request for one
+// dropped limb came back as "Complete hazard tree removal" + stump grinding with
+// "Emergency service rates applied" (2026-10-04), the same worst-case pattern as
+// Matt Roberts' runs (crane, power lines, flat 50-60 ft; 2026-09-10). These are
+// enforced here, not only asked for in the prompt:
+//   - a line item is priced only if its scope belongs to the requested service;
+//     anything else becomes a "not included" follow-up, outside the total
+//   - the emergency multiplier is applied by this code, and only on the
+//     emergency service; the model prices everything at standard rates
+//   - totals are recomputed from the line items, with the minimum job applied
+// ---------------------------------------------------------------------------
+// 'other' is allowed for every service, but only for the shop's configured
+// add-ons and fee-type lines (permit, travel, disposal); see isAllowedOther.
+export const SERVICE_SCOPES = {
+  removal:      ['removal', 'stump', 'haul', 'cleanup', 'other'],
+  trimming:     ['trimming', 'haul', 'cleanup', 'other'],
+  storm_damage: ['cleanup', 'haul', 'trimming', 'other'],
+  emergency:    ['removal', 'cleanup', 'haul', 'trimming', 'stump', 'other'],
+};
+// Order matters: the shop's own add-ons are always priced; fee-type lines are
+// priced unless they are crane/bucket-truck equipment; anything else tagged
+// "other" (e.g. an untagged tree removal) is not.
+const OTHER_FEE = /\b(permit|travel|trip|disposal|dump|chipping|chips?|mulch|fee)\b/i;
+const EQUIPMENT = /\b(crane|bucket truck)\b/i;
+function isAllowedOther(description, config) {
+  const addOns = Array.isArray(config?.add_ons) ? config.add_ons : [];
+  const d = description.toLowerCase();
+  if (addOns.some(a => a?.name && d.includes(String(a.name).toLowerCase()))) return true;
+  return OTHER_FEE.test(description) && !EQUIPMENT.test(description);
+}
+const ALL_SCOPES = ['removal', 'trimming', 'cleanup', 'haul', 'stump', 'other'];
+
+// A sentence in notes that claims emergency pricing. Matched per sentence, so a
+// decimal ("1.5 ft") elsewhere in the notes is never cut in half.
+const EMERGENCY_CLAIM = /\bemergency (?:service |response )?(?:rate|rates|pricing|multiplier|surcharge|premium)\b/i;
+const DEFAULT_MINIMUM_JOB = 350;
+const DEFAULT_SCOPE = { removal: 'removal', trimming: 'trimming', storm_damage: 'cleanup', emergency: 'removal' };
+
+const roundTo25 = n => Math.round(n / 25) * 25;
+
+// An explicit 0 means "no minimum"; only a missing or unusable value takes the
+// default. Used by both the prompt and the totals so they always agree.
+function resolveMinimumJob(config = {}) {
+  const v = config?.minimum_job;
+  const n = Number(v);
+  return v === null || v === undefined || v === '' || !Number.isFinite(n) || n < 0 ? DEFAULT_MINIMUM_JOB : n;
+}
+// A usable price: a finite, non-negative number. '' and null are NOT zero.
+const stripEmergencyPrefix = t => t.replace(/^emergency\s+/i, '').replace(/^./, c => c.toUpperCase());
+
+const toPrice = v => {
+  if (v === null || v === undefined) return NaN;
+  const n = Number(typeof v === 'string' ? v.replace(/[$,\s]/g, '') : v);
+  return typeof v === 'string' && !v.replace(/[$,\s]/g, '') ? NaN : (n >= 0 ? n : NaN);
+};
+const money = n => `$${Number(n).toLocaleString('en-US')}`;
+
+// Drops only the sentences that claim emergency pricing. Splits on sentence ends
+// followed by any non-space start (digits and lowercase too), and keeps line
+// breaks between paragraphs.
+function stripEmergencyClaims(notes) {
+  return notes
+    .split(/\n/)
+    .map(para => para
+      .split(/(?<=[.!?])\s+(?=\S)/)
+      .filter(sentence => !EMERGENCY_CLAIM.test(sentence))
+      .join(' ')
+      .trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function enforceScope(estimate, serviceType, config = {}) {
+  const allowed = SERVICE_SCOPES[serviceType] ?? ALL_SCOPES;
+  const isEmergency = serviceType === 'emergency';
+  const mult = isEmergency ? Number(config.emergency_multiplier) || 1.5 : 1;
+  const original = Array.isArray(estimate.line_items) ? estimate.line_items : [];
+
+  const kept = [];
+  const followups = Array.isArray(estimate.recommended_followups)
+    ? estimate.recommended_followups.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim())
+    : [];
+
+  for (const item of original) {
+    let description = String(item?.description ?? '').trim();
+    if (!description) continue;
+    const low = toPrice(item?.price_low ?? item?.low);
+    const high = toPrice(item?.price_high ?? item?.high);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) {
+      console.error('ESTIMATE ITEM UNPRICED:', JSON.stringify(item));
+      followups.push(description);
+      continue;
+    }
+    // A missing scope is the model forgetting the field, not out-of-scope work.
+    let scope = String(item?.scope ?? '').toLowerCase().trim();
+    if (!scope) scope = DEFAULT_SCOPE[serviceType] ?? 'other';
+    if (!allowed.includes(scope) || (scope === 'other' && !isAllowedOther(description, config))) {
+      followups.push(description);
+      continue;
+    }
+    if (!isEmergency) description = stripEmergencyPrefix(description);
+    const lo = Math.min(low, high) * mult;
+    const hi = Math.max(low, high) * mult;
+    kept.push({
+      description,
+      scope,
+      price_low:  mult === 1 ? lo : roundTo25(lo),
+      price_high: mult === 1 ? hi : roundTo25(hi),
+    });
+  }
+
+  if (!kept.length) {
+    // Nothing the model priced fits what the customer asked for. Don't price the
+    // out-of-scope work (that is the 2026-10-04 bug) and don't fail the request
+    // (that loses the lead): quote an on-site assessment at the minimum job and
+    // list the rest as not included. Logged so the scope rules can be tuned.
+    console.error('ENFORCE SCOPE: nothing priced in scope; assessment fallback:', JSON.stringify({ serviceType, original }));
+    // A starting number, not a charge for the visit, and no promise about what
+    // the visit costs (that is the shop's call). A shop with no minimum still
+    // needs a starting number, so the default stands in.
+    const min = (resolveMinimumJob(config) || DEFAULT_MINIMUM_JOB) * mult;
+    kept.push({
+      description: 'Starting price. Exact price set after an on-site look.',
+      scope: DEFAULT_SCOPE[serviceType] ?? 'other',
+      price_low: mult === 1 ? min : roundTo25(min),
+      price_high: mult === 1 ? min : roundTo25(min),
+    });
+  }
+
+  // Anything priced must not also be listed as "not included" (two items can
+  // read the same after the species scrub, or across the emergency prefix).
+  const bare = t => stripEmergencyPrefix(t).toLowerCase();
+  const priced = new Set(kept.map(i => bare(i.description)));
+  for (let i = followups.length - 1; i >= 0; i--) if (priced.has(bare(followups[i]))) followups.splice(i, 1);
+
+  estimate.line_items = kept;
+  const sumLow = kept.reduce((t, i) => t + i.price_low, 0);
+  const sumHigh = kept.reduce((t, i) => t + i.price_high, 0);
+  const minimum = resolveMinimumJob(config);
+  estimate.total_low = Math.max(sumLow, minimum);
+  estimate.total_high = Math.max(sumHigh, minimum);
+
+  let notes = typeof estimate.notes === 'string' ? estimate.notes : '';
+  // The model's own emergency-pricing claims are removed on every service; the
+  // code's surcharge line is the only one. (Safety concerns have their own list.)
+  notes = stripEmergencyClaims(notes);
+  if (sumLow < minimum) {
+    notes = `${notes}${notes ? ' ' : ''}The minimum job is ${money(minimum)}, so the total starts there.`;
+  }
+  if (followups.length) {
+    const list = [...new Set(followups)].join('; ');
+    notes = `${notes}${notes ? ' ' : ''}Not included in this estimate: ${list}. An on-site visit will confirm whether any of it is needed.`;
+  }
+  if (isEmergency && mult !== 1) {
+    notes = `${notes}${notes ? ' ' : ''}Emergency response pricing (${mult}x standard rates) is included.`;
+  }
+  estimate.notes = notes;
+  delete estimate.recommended_followups;
+  return estimate;
+}
+
+// ---------------------------------------------------------------------------
 // Build customer-aware system prompt
 // ---------------------------------------------------------------------------
-function buildSystemPrompt(customer, config) {
+function buildSystemPrompt(customer, config, serviceType) {
   const businessName = customer.business_name || customer.company_name || 'this tree service company';
   const cfg = config ?? {};
 
@@ -133,8 +377,8 @@ function buildSystemPrompt(customer, config) {
       ? `$${cfg.base_rate_trimming_low}–$${cfg.base_rate_trimming_high}`
       : 'regional market rate';
 
-  const minJob = cfg.minimum_job ? `$${cfg.minimum_job}` : '$350';
-  const emergencyMult = cfg.emergency_multiplier ?? 1.5;
+  const minJob = `$${resolveMinimumJob(cfg)}`;
+  const scopes = (SERVICE_SCOPES[serviceType] ?? ALL_SCOPES).join(', ');
   const serviceZips = cfg.service_zips?.length ? cfg.service_zips.join(', ') : 'all areas';
   const addOnsText = cfg.add_ons?.length
     ? cfg.add_ons.map(a => `${a.name} ($${a.low}–$${a.high})`).join(', ')
@@ -149,13 +393,55 @@ PRICING GUIDELINES FOR THIS COMPANY:
 - Tree removal: ${removalRange} base range
 - Trimming/pruning: ${trimmingRange} base range
 - Minimum job: ${minJob}
-- Emergency service multiplier: ${emergencyMult}x standard rates${marketLine}
+- Price every line at STANDARD rates. Never apply an emergency, storm, or rush
+  multiplier yourself and never mention emergency rates; the system applies any
+  surcharge after you answer.${marketLine}
 - Service area zip codes: ${serviceZips}
 - Available add-ons: ${addOnsText}
 
 If no pricing config is set, use regional market rates for the zip code provided.
 
 You respond ONLY with valid JSON — no markdown, no prose, no explanation outside the JSON.
+
+SCOPE. Price only the work the customer asked for. Every line item has a "scope",
+and for this request the allowed scopes are: ${scopes}.
+Scope meanings: "removal" = taking down a tree that is still standing.
+"cleanup" = cutting up and clearing wood that is already down, including a whole
+tree that has fallen, and cutting back torn stubs. "trimming" = pruning live
+limbs. "haul" = hauling debris away. "stump" = stump grinding. Work the photos suggest
+but the customer did not ask for (for example removing a standing tree when they
+asked for storm cleanup, or a stump they did not mention) goes in
+"recommended_followups" as a short plain phrase, never in line_items.
+
+EVIDENCE. A certified arborist reads this. Every complexity factor and safety
+concern must be something visible in these photos. Do not assume power lines, a
+crane, structures, decay, or access limits you cannot see. One broken limb on a
+tree that is otherwise standing is a cleanup job, not a catastrophe. Describe
+damage exactly as it appears: if you see one split, say one split, not
+"multiple broken limbs"; do not mention hanging limbs you cannot point to.
+
+EQUIPMENT. Most residential removals are climbed and rigged. Do not recommend
+or price a crane unless the photos show the tree cannot be climbed or rigged
+(for example it is leaning on a house with no drop zone). A fence or a house
+nearby means careful rigging, not a crane.
+
+OAKS. Only if you name an oak in the species field with confidence of 85 or
+more, say in notes that pruning wounds should be painted right away and that
+pruning is best avoided February through June (oak wilt). Otherwise give no
+species-specific advice.
+
+CONDITION, chosen strictly:
+- Healthy: no visible defects.
+- Fair: minor defects, or one failed limb on an otherwise sound tree.
+- Poor: multiple defects, significant dieback, or visible decay in the trunk.
+- Hazardous: failure of what is still standing looks likely soon AND a target
+  (house, vehicle, road, people) is within reach. Damage alone is not hazardous.
+
+HEIGHT. Measure against something in frame: a privacy fence is about 6 ft, a
+door about 7 ft, a single-story eave about 9-10 ft, a two-story roofline about
+20-25 ft, a car about 5 ft tall. Most residential trees are 20-45 ft; do not
+default to a stock range. If the top is out of frame or nothing gives scale,
+give a wide range and say so in notes.
 
 When analyzing photos, assess:
 1. Tree species, with an honest confidence percentage
@@ -178,6 +464,9 @@ If you cannot identify the tree, return species as null and species_confidence a
 0. Never put the uncertainty itself in the species field: "Unidentifiable" and
 "Unable to determine" are not species names.
 
+Name the species ONLY in the species field. Everywhere else (line items, notes,
+factors, concerns) call it "the tree".
+
 Return a JSON object with this exact structure — all fields required:
 
 {
@@ -192,10 +481,12 @@ Return a JSON object with this exact structure — all fields required:
   "line_items": [
     {
       "description": "string — plain-English line item label",
+      "scope": "one of: removal | trimming | cleanup | haul | stump | other",
       "price_low": number,
       "price_high": number
     }
   ],
+  "recommended_followups": ["array of short phrases for work outside the requested scope — [] if none"],
   "total_low": number,
   "total_high": number,
   "notes": "string — 1–2 sentences with any important context or caveats for the customer"
@@ -489,11 +780,11 @@ export default async function handler(req, res) {
     // -----------------------------------------------------------------------
     // 5. Phase 2 — generate estimate
     // -----------------------------------------------------------------------
-    const systemPrompt = buildSystemPrompt(customer, customerConfig);
+    const systemPrompt = buildSystemPrompt(customer, customerConfig, serviceType);
 
     const message = await anthropic.messages.create({
       model:      'claude-sonnet-4-5',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system:     systemPrompt,
       messages: [{
         role: 'user',
@@ -510,11 +801,17 @@ export default async function handler(req, res) {
       console.error('Claude returned non-JSON:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
-    if (!estimate || typeof estimate !== 'object' || Array.isArray(estimate)) {
+    // A refusal or error object (no estimate fields at all) is a failed estimate.
+    // A real estimate that only lacks line_items goes on to the fallback, so the
+    // lead is kept.
+    const looksLikeEstimate = estimate && typeof estimate === 'object' && !Array.isArray(estimate)
+      && (Array.isArray(estimate.line_items) || estimate.condition || estimate.estimated_height);
+    if (!looksLikeEstimate) {
       console.error('Claude returned JSON that is not an estimate object:', message.content[0].text);
       return res.status(500).json({ error: 'Failed to parse estimate from AI response.' });
     }
     applySpeciesGate(estimate);
+    enforceScope(estimate, serviceType, customerConfig ?? {});
 
     const lead = { name, email, phone, zip, serviceType, timestamp: new Date().toISOString() };
 
