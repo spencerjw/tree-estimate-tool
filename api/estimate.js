@@ -271,6 +271,69 @@ function stripEmergencyClaims(notes) {
     .trim();
 }
 
+// Pruning is one job: separate pruning lines (crown cleaning, thinning,
+// selective pruning...) read as charging three times. Merge them into one line
+// that names the work; the price is the sum. Ball moss lines become a notes
+// observation. "Flush" cuts are rewritten to the branch collar.
+const EPIPHYTE = /\b(ball moss|spanish moss|epiphytes?|lichen)\b/i;
+const lowerFirst = t => t.replace(/^[A-Z](?![A-Z])/, c => c.toLowerCase());
+
+export function mergePruning(estimate) {
+  const items = Array.isArray(estimate.line_items) ? estimate.line_items : [];
+  const observations = [];
+  const kept = [];
+  for (const item of items) {
+    if (EPIPHYTE.test(item?.description ?? '')) {
+      observations.push(item.description.match(EPIPHYTE)[0].toLowerCase());
+      continue;
+    }
+    kept.push(item);
+  }
+  const pruning = kept.filter(i => i.scope === 'trimming');
+  if (pruning.length > 1) {
+    const merged = {
+      description: `Prune: ${pruning.map(i => lowerFirst(i.description.replace(/^prune:\s*/i, ''))).join('; ')}`,
+      scope: 'trimming',
+      price_low: pruning.reduce((t, i) => t + i.price_low, 0),
+      price_high: pruning.reduce((t, i) => t + i.price_high, 0),
+    };
+    const first = kept.indexOf(pruning[0]);
+    estimate.line_items = kept.filter(i => i.scope !== 'trimming');
+    estimate.line_items.splice(Math.min(first, estimate.line_items.length), 0, merged);
+  } else {
+    estimate.line_items = kept;
+  }
+  if (observations.length) {
+    const what = [...new Set(observations)].join(' and ');
+    const note = `${what[0].toUpperCase()}${what.slice(1)} is visible in the canopy.`;
+    if (!new RegExp(what.split(' and ')[0], 'i').test(estimate.notes || '')) {
+      estimate.notes = `${estimate.notes ? estimate.notes + ' ' : ''}${note}`;
+    }
+  }
+  return estimate;
+}
+
+function collarCuts(text) {
+  return text
+    .replace(/\bflush\s+(?:with|to|against)\s+(?:the\s+)?(?:trunk|stem|parent (?:limb|branch))\b/gi, 'to the branch collar')
+    .replace(/\bflush[- ]cut(s?)\b/gi, 'collar cut$1')
+    .replace(/\bcut(s?)\s+flush\b/gi, 'cut$1 to the branch collar');
+}
+
+// What the height was judged against goes into the notes; with no basis the
+// height is marked as unscaled rather than presented as a measurement.
+function applyHeightBasis(estimate) {
+  const basis = typeof estimate.height_basis === 'string' ? estimate.height_basis.trim().replace(/\.$/, '') : '';
+  const noScale = !basis || /\b(no|nothing)\b.*\b(scale|reference)\b|not visible|out of frame/i.test(basis);
+  if (typeof estimate.estimated_height === 'string' && noScale && !/no scale/i.test(estimate.estimated_height)) {
+    estimate.estimated_height = `${estimate.estimated_height} (no scale reference visible)`;
+  }
+  if (basis && !noScale) {
+    estimate.notes = `${estimate.notes ? estimate.notes + ' ' : ''}Height judged against: ${lowerFirst(basis)}.`;
+  }
+  return estimate;
+}
+
 export function enforceScope(estimate, serviceType, config = {}) {
   const allowed = SERVICE_SCOPES[serviceType] ?? ALL_SCOPES;
   const isEmergency = serviceType === 'emergency';
@@ -357,6 +420,16 @@ export function enforceScope(estimate, serviceType, config = {}) {
   }
   estimate.notes = notes;
   delete estimate.recommended_followups;
+  mergePruning(estimate);
+  applyHeightBasis(estimate);
+  for (const item of estimate.line_items) item.description = collarCuts(item.description);
+  estimate.notes = collarCuts(estimate.notes);
+  // Totals follow the line items (a ball-moss line may have been removed).
+  const lo = estimate.line_items.reduce((t, i) => t + i.price_low, 0);
+  const hi = estimate.line_items.reduce((t, i) => t + i.price_high, 0);
+  const min = resolveMinimumJob(config);
+  estimate.total_low = Math.max(lo, min);
+  estimate.total_high = Math.max(hi, min);
   return estimate;
 }
 
@@ -439,9 +512,21 @@ CONDITION, chosen strictly:
 
 HEIGHT. Measure against something in frame: a privacy fence is about 6 ft, a
 door about 7 ft, a single-story eave about 9-10 ft, a two-story roofline about
-20-25 ft, a car about 5 ft tall. Most residential trees are 20-45 ft; do not
-default to a stock range. If the top is out of frame or nothing gives scale,
-give a wide range and say so in notes.
+20-25 ft, a car about 5 ft tall. Never fall back on a typical or stock range.
+In "height_basis", say exactly what you measured against and in which photo
+(for example "6 ft fence in photo 2, tree about 5 fence-heights"). If the top
+is out of frame or nothing gives scale, say so in height_basis and give a wide
+range.
+
+TRIMMING. Price all pruning as ONE line item with scope "trimming" whose
+description names the work (for example "Prune: remove deadwood, thin the
+crown, raise lower limbs over the structure"). Do not split crown cleaning,
+thinning and selective pruning into separate lines; that reads as charging
+three times for one job. Ball moss or other epiphytes are an observation for
+the notes, not a line item.
+
+CUTS. Pruning and cleanup cuts go to the branch collar. Never write "flush cut"
+or "flush to the trunk".
 
 When analyzing photos, assess:
 1. Tree species, with an honest confidence percentage
@@ -472,8 +557,9 @@ Return a JSON object with this exact structure — all fields required:
 {
   "species": "string — your best species call, e.g. 'Live oak'",
   "species_confidence": number from 0 to 100 (a whole percent, e.g. 92 — NOT 0.92),
-  "estimated_height": "string — e.g. '40–50 feet'",
-  "trunk_diameter": "string — e.g. '18–24 inches at chest height'",
+  "estimated_height": "string — a range in feet from your own measurement",
+  "height_basis": "string — what in which photo you measured height against, or that nothing gave scale",
+  "trunk_diameter": "string — a range in inches at chest height",
   "condition": "Healthy | Fair | Poor | Hazardous",
   "complexity": "Low | Medium | High | Very High",
   "complexity_factors": ["array of plain-English strings describing what drives complexity"],

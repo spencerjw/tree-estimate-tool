@@ -251,3 +251,38 @@ test('street and place names with tree words survive the scrub', () => {
     line_items: [{ description: 'Cleanup', price_low: 1, price_high: 2 }] });
   assert.equal(e.notes, 'Access from Oak Hills Dr. Serving Cypress Creek and Live Oak, TX.');
 });
+
+test('trimming: separate pruning lines merge into one priced line; ball moss is a note', () => {
+  const e = enforceScope({ notes: 'Healthy live oak.', line_items: [
+    { description: 'Crown cleaning and deadwood removal', scope: 'trimming', price_low: 300, price_high: 450 },
+    { description: 'Selective pruning of limbs near pavilion', scope: 'trimming', price_low: 250, price_high: 400 },
+    { description: 'General canopy thinning', scope: 'trimming', price_low: 200, price_high: 350 },
+    { description: 'Ball moss removal', scope: 'trimming', price_low: 100, price_high: 200 },
+    { description: 'Debris haul-away', scope: 'haul', price_low: 100, price_high: 150 }] }, 'trimming', {});
+  assert.equal(e.line_items.length, 2);
+  assert.equal(e.line_items[0].description, 'Prune: crown cleaning and deadwood removal; selective pruning of limbs near pavilion; general canopy thinning');
+  assert.deepEqual([e.line_items[0].price_low, e.line_items[0].price_high], [750, 1200]);
+  assert.deepEqual([e.total_low, e.total_high], [850, 1350]);
+  assert.match(e.notes, /Ball moss is visible in the canopy\./);
+});
+
+test('flush cuts are rewritten to the branch collar', () => {
+  const e = enforceScope({ notes: 'Make a flush cut on the stub.',
+    line_items: [{ description: 'Cut back remaining stub flush to trunk to prevent further tearing', scope: 'cleanup', price_low: 400, price_high: 600 }] }, 'storm_damage', {});
+  assert.equal(e.line_items[0].description, 'Cut back remaining stub to the branch collar to prevent further tearing');
+  assert.equal(e.notes, 'Make a collar cut on the stub.');
+  assert.doesNotMatch(JSON.stringify(e), /flush/i);
+});
+
+test('height basis goes to notes; no basis marks the height unscaled', () => {
+  const a = enforceScope({ notes: '', estimated_height: '30–35 feet', height_basis: '6 ft fence in photo 2, about 5 fence-heights',
+    line_items: [{ description: 'Remove tree', scope: 'removal', price_low: 1000, price_high: 2000 }] }, 'removal', {});
+  assert.equal(a.estimated_height, '30–35 feet');
+  assert.match(a.notes, /Height judged against: 6 ft fence in photo 2, about 5 fence-heights\./);
+  const b = enforceScope({ notes: '', estimated_height: '40–60 feet', height_basis: 'Top of the tree is out of frame; no scale reference',
+    line_items: [{ description: 'Remove tree', scope: 'removal', price_low: 1000, price_high: 2000 }] }, 'removal', {});
+  assert.equal(b.estimated_height, '40–60 feet (no scale reference visible)');
+  const c = enforceScope({ notes: '', estimated_height: '40–60 feet',
+    line_items: [{ description: 'Remove tree', scope: 'removal', price_low: 1000, price_high: 2000 }] }, 'removal', {});
+  assert.equal(c.estimated_height, '40–60 feet (no scale reference visible)');
+});
