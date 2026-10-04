@@ -95,9 +95,12 @@ async function afterPortal(res, stripe, customer) {
     try {
       await stripe.subscriptions.update(sub.id, { default_payment_method: pmId });
     } catch (err) {
-      // Not fatal: the charge below passes the card explicitly, and the card is
-      // already the customer default for later renewals.
+      // Stop here rather than charge: an old card pinned on the subscription
+      // would keep taking the renewals. The link works again on a retry.
       console.error('Billing return: could not pin card on subscription:', err.message);
+      return page(res, 200, 'Card saved, one more step',
+        `<p>Your card is on file, but we could not set it on your plan just now. Nothing was charged.
+         Open the same link again in a minute, or reply to any TreeSnap email.</p>`);
     }
   }
   const shop = `<a href="https://${customer.subdomain}.treesnap.cloud">${customer.subdomain}.treesnap.cloud</a>`;
@@ -131,47 +134,59 @@ async function afterPortal(res, stripe, customer) {
 
 // Returns 'paid' | 'failed' | 'nothing'.
 async function chargeNow(stripe, sub, pmId) {
-  // Unpaid invoices on this sub, oldest first: open renewals (past_due/unpaid can
-  // have several) and any draft a previous return left before finalizing.
-  const unpaid = async () => {
-    const [open, draft] = await Promise.all([
-      stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 }),
-      stripe.invoices.list({ subscription: sub.id, status: 'draft', limit: 20 }),
-    ]);
-    return [...draft.data, ...open.data].sort((x, y) => x.created - y.created);
-  };
-  let invoices = await unpaid();
-
-  if (!invoices.length && sub.status === 'paused') {
-    // Resuming creates the first invoice but doesn't charge it (open or draft,
-    // auto_advance off) and the sub stays paused until it's paid. The key is per
-    // pause (the pre-resume latest invoice), so overlapping returns resume once.
-    const resumed = await stripe.subscriptions.resume(
-      sub.id,
-      { billing_cycle_anchor: 'now', expand: ['latest_invoice'] },
-      { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(sub.latest_invoice)}` },
-    );
-    invoices = resumed.latest_invoice ? [resumed.latest_invoice] : await unpaid();
-  }
-  if (!invoices.length) return 'nothing';
-
-  for (let invoice of invoices) {
-    try {
-      if (invoice.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
-      // No idempotency key: Stripe caches a decline under a key for 24h, which
-      // would replay it after the owner fixes the card. A paid invoice can't be
-      // charged twice, and a concurrent return's payment is caught below.
-      if (invoice.status === 'open') invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId });
-    } catch (err) {
-      invoice = await stripe.invoices.retrieve(invoice.id);
-      if (invoice.status !== 'paid') {
-        console.error('Billing return: invoice not paid:', invoice.id, err.message);
-        return 'failed';
+  // Pay one invoice with the new card. A concurrent return may be finalizing or
+  // paying the same invoice; if a step throws, look again before calling it failed.
+  const settle = async (invoice) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (invoice.status === 'draft') invoice = await stripe.invoices.finalizeInvoice(invoice.id);
+        // No idempotency key: Stripe caches a decline under a key for 24h, which
+        // would replay it after the owner fixes the card. A paid invoice can't be
+        // charged twice.
+        if (invoice.status === 'open') invoice = await stripe.invoices.pay(invoice.id, { payment_method: pmId });
+        return invoice.status === 'paid';
+      } catch (err) {
+        console.error('Billing return: settle attempt failed:', invoice.id, err.message);
+        await new Promise(r => setTimeout(r, 1500));
+        invoice = await stripe.invoices.retrieve(invoice.id);
+        if (invoice.status === 'paid') return true;
       }
     }
-    if (invoice.status !== 'paid') return 'failed';
+    return false;
+  };
+
+  // Unpaid invoices on this sub, oldest first: open renewals (past_due/unpaid can
+  // have several), plus drafts a previous paused-sub return left unfinalized.
+  const listUnpaid = async () => {
+    const lists = [stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 })];
+    if (sub.status === 'paused') lists.push(stripe.invoices.list({ subscription: sub.id, status: 'draft', limit: 20 }));
+    return (await Promise.all(lists)).flatMap(l => l.data).sort((x, y) => x.created - y.created);
+  };
+
+  let charged = false;
+  for (const invoice of await listUnpaid()) {
+    if (!(await settle(invoice))) return 'failed';
+    charged = true;
   }
-  return 'paid';
+
+  if (sub.status === 'paused') {
+    // Paying a stray invoice does not unpause a sub; only resume does. Resuming
+    // creates the first invoice but doesn't charge it (open or draft,
+    // auto_advance off). The key is per pause (the pre-resume latest invoice),
+    // so overlapping returns resume once.
+    const current = await stripe.subscriptions.retrieve(sub.id);
+    if (current.status === 'paused') {
+      const resumed = await stripe.subscriptions.resume(
+        sub.id,
+        { billing_cycle_anchor: 'now', expand: ['latest_invoice'] },
+        { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(current.latest_invoice)}` },
+      );
+      const first = resumed.latest_invoice;
+      if (first && first.status !== 'paid' && !(await settle(first))) return 'failed';
+      charged = true;
+    }
+  }
+  return charged ? 'paid' : 'nothing';
 }
 
 // "Email me a link" on a paused shop page. The response never says whether the
