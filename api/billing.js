@@ -116,6 +116,12 @@ async function afterPortal(res, stripe, customer) {
       return page(res, 200, 'Card saved. Your tool is back on.',
         `<p>The payment went through. ${shop} takes estimate requests again within a minute or two.</p>`);
     }
+    if (outcome?.action) {
+      return page(res, 200, 'Your bank needs to confirm this card',
+        `<p>Your card is saved. Your bank wants you to approve this payment before it goes through.
+         <a href="${outcome.action}">Open the secure payment page</a> to confirm it, and ${shop}
+         turns back on as soon as it's paid.</p>`);
+    }
     if (outcome === 'nothing') {
       return page(res, 200, 'Card saved',
         `<p>Your card is on file and there is nothing to charge right now. If ${shop} is still
@@ -132,8 +138,9 @@ async function afterPortal(res, stripe, customer) {
   return page(res, 200, 'Card saved', '<p>Future monthly charges will use this card.</p>');
 }
 
-// Returns 'paid' | 'failed' | 'nothing'.
+// Returns 'paid' | 'failed' | 'nothing' | { action: url } (bank confirmation needed).
 async function chargeNow(stripe, sub, pmId) {
+  let needsAction = null;
   // Pay one invoice with the new card. A concurrent return may be finalizing or
   // paying the same invoice; if a step throws, look again before calling it failed.
   const settle = async (invoice) => {
@@ -149,8 +156,15 @@ async function chargeNow(stripe, sub, pmId) {
         console.error('Billing return: settle attempt failed:', invoice.id, err.message);
         // A decline or a 3DS requirement won't change on a retry; don't hit the
         // card twice. Anything else may be a concurrent return mid-payment.
-        const final = err?.type === 'StripeCardError'
-          || ['authentication_required', 'invoice_payment_intent_requires_action', 'card_declined'].includes(err?.code);
+        if (['authentication_required', 'invoice_payment_intent_requires_action'].includes(err?.code)) {
+          // The bank wants the owner to confirm (3DS). Hand them Stripe's invoice
+          // page, which runs the confirmation; a retry here never can.
+          const inv = await stripe.invoices.retrieve(invoice.id);
+          if (inv.status === 'paid') return true;
+          needsAction = inv.hosted_invoice_url || needsAction;
+          return false;
+        }
+        const final = err?.type === 'StripeCardError';
         if (!final) await new Promise(r => setTimeout(r, 1500));
         invoice = await stripe.invoices.retrieve(invoice.id);
         if (invoice.status === 'paid') return true;
@@ -170,7 +184,7 @@ async function chargeNow(stripe, sub, pmId) {
 
   let charged = false;
   for (const invoice of await listUnpaid()) {
-    if (!(await settle(invoice))) return 'failed';
+    if (!(await settle(invoice))) return needsAction ? { action: needsAction } : 'failed';
     charged = true;
   }
 
@@ -188,7 +202,7 @@ async function chargeNow(stripe, sub, pmId) {
         { idempotencyKey: `treesnap-resume-${sub.id}-${idOf(sub.latest_invoice)}` },
       );
       const first = resumed.latest_invoice;
-      if (first && first.status !== 'paid' && !(await settle(first))) return 'failed';
+      if (first && first.status !== 'paid' && !(await settle(first))) return needsAction ? { action: needsAction } : 'failed';
       charged = true;
     }
   }
