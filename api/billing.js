@@ -197,11 +197,14 @@ async function chargeNow(stripe, sub, pmId) {
       sub.latest_invoice ? stripe.invoices.retrieve(idOf(sub.latest_invoice)) : null,
       stripe.invoices.list({ subscription: sub.id, status: 'open', limit: 20 }),
     ]);
-    if (!latest || ['paid', 'void'].includes(latest.status)) return 'nothing';
-    if (!(await settle(latest))) return needsAction ? { action: needsAction } : 'failed';
-    const older = openList.data.filter(inv => inv.id !== latest.id);
+    // Set the older months aside first, whatever happens to the current charge:
+    // once a new card is pinned, Stripe's retries would otherwise bill it for
+    // months the tool was off.
+    const older = openList.data.filter(inv => inv.id !== latest?.id);
     await Promise.all(older.map(inv => stripe.invoices.markUncollectible(inv.id).catch(err =>
       console.error('Billing return: could not mark old invoice uncollectible:', inv.id, err.message))));
+    if (!latest || ['paid', 'void'].includes(latest.status)) return 'nothing';
+    if (!(await settle(latest))) return needsAction ? { action: needsAction } : 'failed';
     return 'paid';
   }
 
@@ -220,7 +223,6 @@ async function chargeNow(stripe, sub, pmId) {
     charged = true;
   }
 
-  // Paused: resume (paying a stray invoice above does not unpause a sub).
   {
     // Paying a stray invoice does not unpause a sub; only resume does. Resuming
     // creates the first invoice but doesn't charge it (open or draft,
